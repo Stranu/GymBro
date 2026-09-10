@@ -13,6 +13,10 @@ App personale (PWA) per gestire le schede di allenamento in palestra. Funziona o
 - **Grafici**:
   - *Scheda corrente*: esercizi di uno stesso tag mostrati come linee affiancate, più il conteggio esercizi per gruppo.
   - *Andamento generale*: tutto lo storico, tra tutte le schede.
+- **Riordino**: trascina gli esercizi (icona ⠿) per cambiarne l'ordine dentro un giorno.
+- **Rinomina esercizio**: dal dettaglio esercizio nella scheda; aggiorna il nome ovunque (è un'entità condivisa).
+- **Timer di recupero** con beep sonoro e vibrazione, nella barra in fondo alla scheda. Precompilato col recupero dell'esercizio. Nota: il suono funziona con l'app aperta in primo piano; a schermo bloccato o in background il browser può sospendere l'audio (limite delle PWA).
+- **Contatore serie** generico nella barra della scheda (+ / − / reset).
 - **Backup**: export/import in JSON dalla sezione "Altro".
 
 ## Come usarla

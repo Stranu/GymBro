@@ -72,11 +72,46 @@ window.setViewTitle = (t) => { viewTitle.textContent = t; };
 router.startRouter();
 
 // Registra service worker (solo se servito via http/https, non file://)
+// e gestisce l'auto-aggiornamento quando pubblichi una nuova versione.
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch((err) => {
+  let refreshing = false;
+
+  // Quando il nuovo SW prende il controllo, ricarica la pagina una sola volta
+  // per mostrare subito la versione aggiornata.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
+
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('./sw.js');
+
+      // Se troviamo un SW in attesa, attiviamolo.
+      if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING');
+
+      // Quando viene trovato un aggiornamento, attivalo appena è pronto.
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          // installed + controller esistente = c'è una versione precedente => update
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            toast('Aggiornamento disponibile…');
+            reg.waiting && reg.waiting.postMessage('SKIP_WAITING');
+          }
+        });
+      });
+
+      // Controlla aggiornamenti a ogni avvio e quando l'app torna in primo piano.
+      reg.update();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update();
+      });
+    } catch (err) {
       console.warn('SW registration failed', err);
-    });
+    }
   });
 }
 

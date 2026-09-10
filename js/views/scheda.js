@@ -5,10 +5,26 @@ import {
   el, clear, openModal, confirmDialog, promptDialog, toast, emptyState, tagChip,
 } from '../ui.js';
 import { openExercisePicker } from './picker.js';
+import { createToolbar, teardownTools, startTimerWith } from './tools.js';
 
 // cache dei pesi più recenti e dei nomi per exerciseId (evita query ripetute e flicker durante il render)
 let latestCache = {};
 let nameCache = {};
+
+/** Estrae i secondi di recupero da un testo libero tipo "2-3 min", "90s", "1:30". */
+function parseRestSeconds(text) {
+  if (!text) return null;
+  const t = String(text).toLowerCase();
+  // formato m:ss
+  const clock = t.match(/(\d+):(\d{1,2})/);
+  if (clock) return parseInt(clock[1], 10) * 60 + parseInt(clock[2], 10);
+  // range tipo "2-3 min" -> prende il valore più alto
+  const nums = t.match(/\d+(?:[.,]\d+)?/g);
+  if (!nums) return null;
+  const val = Math.max(...nums.map((n) => parseFloat(n.replace(',', '.'))));
+  if (t.includes('min')) return Math.round(val * 60);
+  return Math.round(val); // presume secondi
+}
 
 export async function renderScheda(mount, params) {
   const id = params[0];
@@ -37,7 +53,25 @@ export async function renderScheda(mount, params) {
     onClick: () => addDay(w),
   }, '+ Aggiungi giorno'));
 
-  mount.appendChild(el('div', { style: 'height:40px;' }));
+  // spazio per non far coprire l'ultimo contenuto dalla barra strumenti fissa
+  mount.appendChild(el('div', { style: 'height:120px;' }));
+
+  // Barra strumenti fissa: contatore serie + timer di recupero
+  const defRest = parseRestSeconds((w.defaults || {}).rest) || 90;
+  mount.appendChild(createToolbar({ defaultRestSeconds: defRest }));
+
+  // Quando si lascia la scheda, ferma il timer
+  registerTeardown();
+}
+
+// Ferma il timer quando si naviga via dalla scheda (una sola volta)
+let teardownHooked = false;
+function registerTeardown() {
+  if (teardownHooked) return;
+  teardownHooked = true;
+  router.onRouteChange((route) => {
+    if (route.name !== 'scheda') teardownTools();
+  });
 }
 
 async function preloadLatest(w) {
@@ -115,9 +149,17 @@ function dayCard(w, day) {
     el('button', { class: 'icon-btn', 'aria-label': 'Opzioni giorno', onClick: () => dayMenu(w, day) }, '⋮'),
   ]);
 
-  const body = items.length
-    ? el('div', {}, items.map((it) => renderItem(w, day, it)))
-    : el('p', { class: 'muted small', text: 'Nessun esercizio. Aggiungine uno qui sotto.' });
+  let body;
+  if (items.length) {
+    body = el('div', { class: 'item-list' }, items.map((it) => {
+      const node = renderItem(w, day, it);
+      node.dataset.itemId = it.id;
+      return node;
+    }));
+    enableReorder(body, w, day);
+  } else {
+    body = el('p', { class: 'muted small', text: 'Nessun esercizio. Aggiungine uno qui sotto.' });
+  }
 
   const actions = el('div', { class: 'list-actions' }, [
     el('button', { class: 'btn btn-sm btn-primary', onClick: () => addExercise(w, day) }, '+ Esercizio'),
@@ -172,6 +214,7 @@ function renderSingle(w, day, item) {
     : (latest && latest.note ? latest.note : '—');
 
   return el('div', { class: 'ex-row' }, [
+    dragHandle(),
     el('div', { class: 'ex-main', onClick: () => openExerciseSheet(w, day, item) }, [
       el('div', { class: 'ex-name', text: name }),
       el('div', { class: 'ex-meta' }, [
@@ -185,6 +228,10 @@ function renderSingle(w, day, item) {
       title: 'Aggiorna peso',
     }, wLabel),
   ]);
+}
+
+function dragHandle() {
+  return el('div', { class: 'drag-handle', 'aria-label': 'Trascina per riordinare', title: 'Trascina per riordinare' }, '⠿');
 }
 
 function renderSuperset(w, day, item) {
@@ -203,11 +250,88 @@ function renderSuperset(w, day, item) {
   const meta = paramLine(w, item);
   return el('div', { class: 'superset' }, [
     el('div', { style: 'display:flex; justify-content:space-between; align-items:center;' }, [
-      el('div', { class: 'superset-label', text: 'Super serie' + (meta ? ' · ' + meta : '') }),
+      el('div', { style: 'display:flex; align-items:center; gap:6px;' }, [
+        dragHandle(),
+        el('div', { class: 'superset-label', style: 'margin-bottom:0;', text: 'Super serie' + (meta ? ' · ' + meta : '') }),
+      ]),
       el('button', { class: 'icon-btn', style: 'width:32px;height:32px;font-size:1.2rem;', onClick: () => supersetMenu(w, day, item) }, '⋮'),
     ]),
     ...rows,
   ]);
+}
+
+/* ---------------- Riordino per trascinamento (Pointer Events, touch-friendly) ---------------- */
+function enableReorder(listEl, w, day) {
+  let dragging = null;
+  let placeholder = null;
+  let startY = 0;
+  let offsetY = 0;
+
+  listEl.querySelectorAll('.drag-handle').forEach((handle) => {
+    handle.addEventListener('pointerdown', (e) => {
+      const row = handle.closest('[data-item-id]');
+      if (!row) return;
+      e.preventDefault();
+      dragging = row;
+      const rect = row.getBoundingClientRect();
+      offsetY = e.clientY - rect.top;
+      startY = e.clientY;
+
+      placeholder = el('div', { class: 'drag-placeholder' });
+      placeholder.style.height = rect.height + 'px';
+      row.parentNode.insertBefore(placeholder, row.nextSibling);
+
+      row.classList.add('dragging');
+      row.style.width = rect.width + 'px';
+      row.style.position = 'fixed';
+      row.style.left = rect.left + 'px';
+      row.style.top = rect.top + 'px';
+      row.style.zIndex = '1000';
+      row.style.pointerEvents = 'none';
+
+      handle.setPointerCapture(e.pointerId);
+      if (navigator.vibrate) navigator.vibrate(15);
+
+      const onMove = (ev) => {
+        if (!dragging) return;
+        const y = ev.clientY;
+        dragging.style.top = (y - offsetY) + 'px';
+        // trova la riga sopra cui siamo
+        const siblings = [...listEl.querySelectorAll('[data-item-id]')].filter((n) => n !== dragging);
+        let placed = false;
+        for (const sib of siblings) {
+          const r = sib.getBoundingClientRect();
+          if (y < r.top + r.height / 2) {
+            listEl.insertBefore(placeholder, sib);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) listEl.appendChild(placeholder);
+      };
+
+      const onUp = async () => {
+        handle.releasePointerCapture(e.pointerId);
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        if (!dragging) return;
+        // posiziona la riga al posto del placeholder
+        listEl.insertBefore(dragging, placeholder);
+        placeholder.remove();
+        dragging.classList.remove('dragging');
+        dragging.removeAttribute('style');
+        // ricava il nuovo ordine dagli elementi DOM
+        const order = [...listEl.querySelectorAll('[data-item-id]')].map((n) => n.dataset.itemId);
+        day.items.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+        dragging = null;
+        placeholder = null;
+        await store.saveWorkout(w);
+      };
+
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    });
+  });
 }
 
 /* ---------------- Aggiunta esercizi ---------------- */
@@ -262,6 +386,7 @@ async function openExerciseSheet(w, day, item) {
   if (!ex) return;
   const d = w.defaults || {};
 
+  const nameIn = el('input', { class: 'input', value: ex.name, placeholder: 'Nome esercizio' });
   const setsIn = el('input', { class: 'input', value: item.sets || '', placeholder: d.sets || '3' });
   const repsIn = el('input', { class: 'input', value: item.reps || '', placeholder: d.reps || '10' });
   const restIn = el('input', { class: 'input', value: item.rest || '', placeholder: d.rest || '2-3 min' });
@@ -284,7 +409,8 @@ async function openExerciseSheet(w, day, item) {
   renderTags();
 
   openModal(ex.name, el('div', {}, [
-    el('p', { class: 'muted small', text: 'Lascia vuoto per usare i default della scheda.' }),
+    el('div', { class: 'field' }, [el('label', { text: 'Nome esercizio' }), nameIn]),
+    el('p', { class: 'muted small', text: 'Serie/ripetizioni/recupero: lascia vuoto per usare i default della scheda.' }),
     el('div', { class: 'row' }, [
       el('div', { class: 'field' }, [el('label', { text: 'Serie' }), setsIn]),
       el('div', { class: 'field' }, [el('label', { text: 'Ripetizioni' }), repsIn]),
@@ -293,6 +419,12 @@ async function openExerciseSheet(w, day, item) {
     el('div', { class: 'field' }, [el('label', { text: 'Note' }), noteIn]),
     el('div', { class: 'field' }, [el('label', { text: 'Tag muscolari' }), tagsWrap]),
     el('div', { class: 'divider' }),
+    el('button', { class: 'btn btn-ghost btn-block', style: 'margin-bottom:8px;', onClick: () => {
+      const secs = parseRestSeconds(item.rest || (w.defaults || {}).rest) || 90;
+      startTimerWith(secs);
+      document.querySelector('.modal-backdrop')?.remove();
+      toast('Timer recupero avviato');
+    } }, '⏱️  Avvia timer recupero'),
     el('button', { class: 'btn btn-ghost btn-block', onClick: () => router.navigate('esercizio/' + ex.id) }, '📈  Vedi storico e grafico'),
   ]), [
     {
@@ -308,6 +440,17 @@ async function openExerciseSheet(w, day, item) {
     },
     {
       label: 'Salva', class: 'btn-primary', onClick: async (c) => {
+        // Rinomina esercizio nel catalogo globale (si aggiorna ovunque).
+        const newName = nameIn.value.trim();
+        if (newName && newName !== ex.name) {
+          const dup = await store.findExerciseByName(newName);
+          if (dup && dup.id !== ex.id) {
+            toast('Esiste già un esercizio con questo nome');
+            return;
+          }
+          ex.name = newName;
+          await store.updateExercise(ex);
+        }
         item.sets = setsIn.value.trim();
         item.reps = repsIn.value.trim();
         item.rest = restIn.value.trim();

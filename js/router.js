@@ -33,8 +33,8 @@ export function getCurrent() {
   return currentRoute;
 }
 
-let onChange = null;
-export function onRouteChange(fn) { onChange = fn; }
+const changeListeners = [];
+export function onRouteChange(fn) { changeListeners.push(fn); }
 
 export async function handleRoute() {
   const { name, params } = parseHash();
@@ -52,7 +52,7 @@ export async function handleRoute() {
   }
   if (main) main.scrollTop = 0;
   window.scrollTo(0, 0);
-  if (onChange) onChange(currentRoute);
+  changeListeners.forEach((fn) => { try { fn(currentRoute); } catch (e) { console.error(e); } });
 }
 
 export function startRouter() {
