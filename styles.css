@@ -272,6 +272,7 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  transition: padding-bottom 0.15s ease;
 }
 .modal {
   background: var(--bg-elev);

@@ -60,12 +60,31 @@ export function toast(msg, ms = 2200) {
  */
 export function openModal(title, bodyNodes, actions = []) {
   const root = document.getElementById('modalRoot');
+  const vv = window.visualViewport;
   const close = () => {
     backdrop.remove();
     document.removeEventListener('keydown', onKey);
+    if (vv) {
+      vv.removeEventListener('resize', onViewport);
+      vv.removeEventListener('scroll', onViewport);
+    }
   };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
+
+  // Solleva il modale sopra la tastiera virtuale: quando la tastiera si apre,
+  // visualViewport.height si riduce; spostiamo il modale della differenza così
+  // i pulsanti (Salva/Crea) restano sempre visibili.
+  const onViewport = () => {
+    if (!vv) return;
+    const keyboard = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    backdrop.style.paddingBottom = keyboard > 60 ? keyboard + 'px' : '';
+    // tieni in vista il campo su cui si sta scrivendo
+    const active = document.activeElement;
+    if (active && modal.contains(active)) {
+      active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  };
 
   const body = el('div', {}, Array.isArray(bodyNodes) ? bodyNodes : [bodyNodes]);
   const actionRow = actions.length
@@ -89,6 +108,14 @@ export function openModal(title, bodyNodes, actions = []) {
 
   const backdrop = el('div', { class: 'modal-backdrop', onClick: close }, [modal]);
   root.appendChild(backdrop);
+
+  if (vv) {
+    vv.addEventListener('resize', onViewport);
+    vv.addEventListener('scroll', onViewport);
+  }
+  // quando un campo riceve il focus, riassesta la vista (utile al primo tap)
+  modal.addEventListener('focusin', () => setTimeout(onViewport, 100));
+
   return { close, body };
 }
 
