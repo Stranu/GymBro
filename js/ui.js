@@ -72,17 +72,26 @@ export function openModal(title, bodyNodes, actions = []) {
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
 
-  // Solleva il modale sopra la tastiera virtuale: quando la tastiera si apre,
-  // visualViewport.height si riduce; spostiamo il modale della differenza così
-  // i pulsanti (Salva/Crea) restano sempre visibili.
+  // Gestione tastiera virtuale: invece di "spingere su" il modale (che per i
+  // pannelli alti nasconde il campo in cima), vincoliamo l'altezza del modale
+  // all'area visibile sopra la tastiera. Così il campo in alto resta sempre
+  // visibile e il contenuto eccedente scorre internamente, coi pulsanti in fondo.
   const onViewport = () => {
     if (!vv) return;
     const keyboard = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    backdrop.style.paddingBottom = keyboard > 60 ? keyboard + 'px' : '';
-    // tieni in vista il campo su cui si sta scrivendo
+    if (keyboard > 60) {
+      // tastiera aperta: vincola il modale all'area visibile e mettilo sopra la tastiera
+      modal.style.maxHeight = (vv.height - 8) + 'px';
+      backdrop.style.paddingBottom = keyboard + 'px';
+    } else {
+      // tastiera chiusa: ripristina i valori di default del CSS
+      modal.style.maxHeight = '';
+      backdrop.style.paddingBottom = '';
+    }
+    // porta in vista il campo attivo senza scavalcare la cima del modale
     const active = document.activeElement;
     if (active && modal.contains(active)) {
-      active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   };
 
