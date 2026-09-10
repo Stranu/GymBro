@@ -307,6 +307,17 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .ac-item:active { background: var(--bg-elev-2); }
 .ac-item .ac-name { font-weight: 600; }
 .ac-item .ac-sub { font-size: 0.78rem; color: var(--text-dim); }
+.ac-section {
+  padding: 8px 12px 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  position: sticky;
+  top: 0;
+}
 
 /* Chart */
 .chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-bottom: 12px; }

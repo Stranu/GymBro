@@ -5,7 +5,7 @@
  * forzare l'aggiornamento). Il cambiamento di questo file fa sì che il browser
  * scarichi la nuova versione, ripulisca la vecchia cache e attivi l'update.
  */
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE = 'gymbro-' + CACHE_VERSION;
 
 const ASSETS = [
@@ -16,6 +16,7 @@ const ASSETS = [
   './js/app.js',
   './js/db.js',
   './js/store.js',
+  './js/exercise-library.js',
   './js/ui.js',
   './js/router.js',
   './js/chart.js',

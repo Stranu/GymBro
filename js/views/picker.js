@@ -1,6 +1,7 @@
 /* GymBro - selettore esercizio riutilizzabile (autocomplete + filtro tag + crea nuovo) */
 import * as store from '../store.js';
-import { el, clear, openModal, tagChip, fmtDate } from '../ui.js';
+import { el, clear, openModal, fmtDate } from '../ui.js';
+import { EXERCISE_LIBRARY } from '../exercise-library.js';
 
 /**
  * Apre il picker. Ritorna Promise<{name, tags[]}|null>.
@@ -9,12 +10,21 @@ import { el, clear, openModal, tagChip, fmtDate } from '../ui.js';
  * nuovo, restituisce il nome digitato e i tag scelti.
  */
 export async function openExercisePicker({ title = 'Scegli esercizio' } = {}) {
-  const [exercises, tags] = await Promise.all([store.listExercises(), store.allTags()]);
+  const [exercises, userTags] = await Promise.all([store.listExercises(), store.allTags()]);
   // ultimo peso per mostrare un contesto utile ("50 kg · agg. 12/07/2026")
   const latestMap = {};
   for (const ex of exercises) {
     latestMap[ex.id] = await store.getLatestWeight(ex.id);
   }
+
+  // Suggeriti dalla libreria statica, esclusi quelli che hai già nel catalogo.
+  const ownNames = new Set(exercises.map((e) => e.name.toLowerCase()));
+  const suggestions = EXERCISE_LIBRARY.filter((s) => !ownNames.has(s.name.toLowerCase()));
+
+  // Tag disponibili per il filtro: unione dei tuoi tag + quelli dei suggeriti.
+  const tagSet = new Set(userTags);
+  suggestions.forEach((s) => (s.tags || []).forEach((t) => tagSet.add(t)));
+  const tags = [...tagSet].sort((a, b) => a.localeCompare(b, 'it'));
 
   return new Promise((resolve) => {
     let activeTag = null;
@@ -41,16 +51,26 @@ export async function openExercisePicker({ title = 'Scegli esercizio' } = {}) {
       });
     };
 
+    const sectionHead = (text) => el('div', { class: 'ac-section', text });
+
     const renderList = () => {
       const q = search.value.trim().toLowerCase();
       clear(list);
-      let filtered = exercises;
-      if (activeTag) filtered = filtered.filter((e) => (e.tags || []).includes(activeTag));
-      if (q) filtered = filtered.filter((e) => e.name.toLowerCase().includes(q));
 
-      // opzione: crea nuovo (se c'è testo e non esiste già identico)
-      const exactExists = exercises.some((e) => e.name.toLowerCase() === q);
-      if (q && !exactExists) {
+      // filtra i TUOI esercizi
+      let mine = exercises;
+      if (activeTag) mine = mine.filter((e) => (e.tags || []).includes(activeTag));
+      if (q) mine = mine.filter((e) => e.name.toLowerCase().includes(q));
+
+      // filtra i SUGGERITI
+      let sugg = suggestions;
+      if (activeTag) sugg = sugg.filter((s) => (s.tags || []).includes(activeTag));
+      if (q) sugg = sugg.filter((s) => s.name.toLowerCase().includes(q));
+
+      // opzione "crea nuovo": solo se c'è testo e nessun match esatto (né tuo né suggerito)
+      const exactMine = exercises.some((e) => e.name.toLowerCase() === q);
+      const exactSugg = suggestions.some((s) => s.name.toLowerCase() === q);
+      if (q && !exactMine && !exactSugg) {
         list.appendChild(el('div', {
           class: 'ac-item', style: 'background:rgba(56,189,248,0.08);',
           onClick: () => { done({ name: search.value.trim(), tags: activeTag ? [activeTag] : [] }); closeModal(); },
@@ -60,25 +80,44 @@ export async function openExercisePicker({ title = 'Scegli esercizio' } = {}) {
         ]));
       }
 
-      if (filtered.length === 0 && !q) {
-        list.appendChild(el('div', { class: 'ac-item muted', text: 'Nessun esercizio nel catalogo. Scrivi un nome per crearne uno.' }));
+      // Sezione: i tuoi esercizi
+      if (mine.length) {
+        list.appendChild(sectionHead('I tuoi esercizi'));
+        mine.slice(0, 60).forEach((ex) => {
+          const latest = latestMap[ex.id];
+          const sub = [
+            (ex.tags || []).length ? (ex.tags.map((t) => '#' + t).join(' ')) : '',
+            latest && latest.value != null ? `${latest.value} kg` : '',
+            latest ? 'agg. ' + fmtDate(latest.date) : '',
+          ].filter(Boolean).join(' · ');
+          list.appendChild(el('div', {
+            class: 'ac-item',
+            onClick: () => { done({ name: ex.name, tags: ex.tags || [] }); closeModal(); },
+          }, [
+            el('div', { class: 'ac-name', text: ex.name }),
+            sub ? el('div', { class: 'ac-sub', text: sub }) : null,
+          ].filter(Boolean)));
+        });
       }
 
-      filtered.slice(0, 50).forEach((ex) => {
-        const latest = latestMap[ex.id];
-        const sub = [
-          (ex.tags || []).length ? (ex.tags.map((t) => '#' + t).join(' ')) : '',
-          latest && latest.value != null ? `${latest.value} kg` : '',
-          latest ? 'agg. ' + fmtDate(latest.date) : '',
-        ].filter(Boolean).join(' · ');
-        list.appendChild(el('div', {
-          class: 'ac-item',
-          onClick: () => { done({ name: ex.name, tags: ex.tags || [] }); closeModal(); },
-        }, [
-          el('div', { class: 'ac-name', text: ex.name }),
-          sub ? el('div', { class: 'ac-sub', text: sub }) : null,
-        ].filter(Boolean)));
-      });
+      // Sezione: suggeriti dalla libreria
+      if (sugg.length) {
+        list.appendChild(sectionHead('Suggeriti'));
+        sugg.slice(0, 60).forEach((s) => {
+          list.appendChild(el('div', {
+            class: 'ac-item',
+            onClick: () => { done({ name: s.name, tags: s.tags || [] }); closeModal(); },
+          }, [
+            el('div', { class: 'ac-name', text: s.name }),
+            (s.tags || []).length ? el('div', { class: 'ac-sub', text: s.tags.map((t) => '#' + t).join(' ') }) : null,
+          ].filter(Boolean)));
+        });
+      }
+
+      // stato vuoto
+      if (!mine.length && !sugg.length && !q) {
+        list.appendChild(el('div', { class: 'ac-item muted', text: 'Nessun esercizio. Scrivi un nome per crearne uno.' }));
+      }
     };
 
     search.addEventListener('input', renderList);
@@ -86,7 +125,7 @@ export async function openExercisePicker({ title = 'Scegli esercizio' } = {}) {
     const body = el('div', {}, [
       search,
       tagBar,
-      el('p', { class: 'muted small', text: 'Riusa un esercizio già fatto (mantiene lo storico) o creane uno nuovo.' }),
+      el('p', { class: 'muted small', text: 'Riusa un tuo esercizio (mantiene lo storico), scegline uno suggerito o creane uno nuovo.' }),
       list,
     ]);
 
