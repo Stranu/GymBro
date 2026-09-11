@@ -12,6 +12,19 @@ let latestCache = {};
 let nameCache = {};
 let progressCache = {};
 
+/**
+ * Ridisegna la scheda mantenendo la posizione di scroll corrente.
+ * Il router resetta lo scroll in cima a ogni render (utile tra pagine diverse),
+ * ma qui vogliamo restare dove siamo quando si aggiungono/modificano esercizi.
+ */
+async function rerender() {
+  const y = window.scrollY;
+  await router.handleRoute();
+  // ripristina dopo che il DOM è stato ricostruito
+  window.scrollTo(0, y);
+  requestAnimationFrame(() => window.scrollTo(0, y));
+}
+
 /** Estrae i secondi di recupero da un testo libero tipo "2-3 min", "90s", "1:30". */
 function parseRestSeconds(text) {
   if (!text) return null;
@@ -138,7 +151,7 @@ function editWorkoutMeta(w) {
         await store.saveWorkout(w);
         c();
         toast('Salvato');
-        router.handleRoute();
+        rerender();
       },
     },
   ]);
@@ -176,7 +189,7 @@ function dayMenu(w, day) {
   const body = el('div', {}, [
     mBtn('✏️  Rinomina giorno', async () => {
       const name = await promptDialog('Rinomina giorno', { label: 'Nome', value: day.name });
-      if (name) { day.name = name; await store.saveWorkout(w); router.handleRoute(); }
+      if (name) { day.name = name; await store.saveWorkout(w); rerender(); }
     }),
     mBtn('🗑️  Elimina giorno', async () => {
       const ok = await confirmDialog('Eliminare il giorno?', `"${day.name}" e i suoi esercizi verranno rimossi dalla scheda.`, { okLabel: 'Elimina', danger: true });
@@ -184,7 +197,7 @@ function dayMenu(w, day) {
         w.days = w.days.filter((d) => d.id !== day.id);
         await store.saveWorkout(w);
         toast('Giorno eliminato');
-        router.handleRoute();
+        rerender();
       }
     }, true),
   ]);
@@ -216,10 +229,13 @@ function renderSingle(w, day, item) {
     ? `${latest.value} kg`
     : (latest && latest.note ? latest.note : '—');
 
-  return el('div', { class: 'ex-row' }, [
+  return el('div', { class: 'ex-row' + (item.pushNext ? ' push-next' : '') }, [
     dragHandle(),
     el('div', { class: 'ex-main', onClick: () => openExerciseSheet(w, day, item) }, [
-      el('div', { class: 'ex-name', text: name }),
+      el('div', { class: 'ex-name' }, [
+        item.pushNext ? el('span', { class: 'push-next-mark', title: 'Prossima volta prova a caricare di più', text: '🔼 ' }) : null,
+        el('span', { text: name }),
+      ].filter(Boolean)),
       el('div', { class: 'ex-meta' }, [
         meta ? el('span', { text: meta }) : null,
         (item.note ? el('span', { text: (meta ? ' · ' : '') + item.note }) : null),
@@ -236,13 +252,31 @@ function dragHandle() {
   return el('div', { class: 'drag-handle', 'aria-label': 'Trascina per riordinare', title: 'Trascina per riordinare' }, '⠿');
 }
 
+/**
+ * Toggle "prossima volta prova a caricare di più".
+ * Mutato in-memory sull'item; viene persistito dal Salva del foglio.
+ * @param {object} target  item singolo o sub-esercizio di una superset
+ */
+function pushNextToggle(target) {
+  const box = el('input', { type: 'checkbox' });
+  box.checked = !!target.pushNext;
+  box.addEventListener('change', () => { target.pushNext = box.checked; });
+  return el('label', { class: 'pushnext-toggle' }, [
+    box,
+    el('span', {}, '🔼  Prossima volta prova a caricare di più'),
+  ]);
+}
+
 function renderSuperset(w, day, item) {
   const rows = (item.exercises || []).map((sub) => {
     const latest = latestCache[sub.exerciseId];
     const wLabel = latest && latest.value != null ? `${latest.value} kg` : (latest && latest.note ? latest.note : '—');
-    return el('div', { class: 'ex-row' }, [
-      el('div', { class: 'ex-main' }, [
-        el('div', { class: 'ex-name', text: exName(sub.exerciseId) }),
+    return el('div', { class: 'ex-row' + (sub.pushNext ? ' push-next' : '') }, [
+      el('div', { class: 'ex-main', onClick: () => openSupersetSubSheet(w, day, item, sub) }, [
+        el('div', { class: 'ex-name' }, [
+          sub.pushNext ? el('span', { class: 'push-next-mark', title: 'Prossima volta prova a caricare di più', text: '🔼 ' }) : null,
+          el('span', { text: exName(sub.exerciseId) }),
+        ].filter(Boolean)),
         el('div', { class: 'ex-meta', text: [sub.reps ? sub.reps + ' rip' : '', sub.note || ''].filter(Boolean).join(' · ') }),
       ]),
       el('div', { class: 'ex-weight-col', onClick: () => quickWeight(w, sub.exerciseId), title: 'Aggiorna peso' }, [
@@ -349,7 +383,7 @@ async function addExercise(w, day) {
   await store.saveWorkout(w);
   latestCache[ex.id] = await store.getLatestWeight(ex.id);
   toast('Esercizio aggiunto');
-  router.handleRoute();
+  rerender();
 }
 
 async function addSuperset(w, day) {
@@ -372,7 +406,7 @@ async function addSuperset(w, day) {
   latestCache[e1.id] = await store.getLatestWeight(e1.id);
   latestCache[e2.id] = await store.getLatestWeight(e2.id);
   toast('Super serie aggiunta');
-  router.handleRoute();
+  rerender();
 }
 
 async function addDay(w) {
@@ -382,7 +416,7 @@ async function addDay(w) {
   w.days = w.days || [];
   w.days.push({ id: store.uid(), name: name || 'G' + n, items: [] });
   await store.saveWorkout(w);
-  router.handleRoute();
+  rerender();
 }
 
 /* ---------------- Sheet dettaglio esercizio singolo ---------------- */
@@ -423,6 +457,7 @@ async function openExerciseSheet(w, day, item) {
     el('div', { class: 'field' }, [el('label', { text: 'Recupero' }), restIn]),
     el('div', { class: 'field' }, [el('label', { text: 'Note' }), noteIn]),
     el('div', { class: 'field' }, [el('label', { text: 'Tag muscolari' }), tagsWrap]),
+    pushNextToggle(item),
     el('div', { class: 'divider' }),
     el('button', { class: 'btn btn-ghost btn-block', style: 'margin-bottom:8px;', onClick: () => {
       const secs = parseRestSeconds(item.rest || (w.defaults || {}).rest) || 90;
@@ -439,7 +474,7 @@ async function openExerciseSheet(w, day, item) {
         if (ok) {
           day.items = day.items.filter((x) => x.id !== item.id);
           await store.saveWorkout(w);
-          router.handleRoute();
+          rerender();
         }
       },
     },
@@ -463,7 +498,35 @@ async function openExerciseSheet(w, day, item) {
         await store.saveWorkout(w);
         c();
         toast('Salvato');
-        router.handleRoute();
+        rerender();
+      },
+    },
+  ]);
+}
+
+/* ---------------- Sheet di un esercizio dentro una super serie ---------------- */
+async function openSupersetSubSheet(w, day, item, sub) {
+  const ex = await store.getExercise(sub.exerciseId);
+  if (!ex) return;
+  const repsIn = el('input', { class: 'input', value: sub.reps || '', placeholder: (w.defaults || {}).reps || '10' });
+  const noteIn = el('input', { class: 'input', value: sub.note || '', placeholder: 'Note (opzionale)' });
+
+  openModal(ex.name + ' · super serie', el('div', {}, [
+    el('div', { class: 'field' }, [el('label', { text: 'Ripetizioni' }), repsIn]),
+    el('div', { class: 'field' }, [el('label', { text: 'Note' }), noteIn]),
+    pushNextToggle(sub),
+    el('div', { class: 'divider' }),
+    el('button', { class: 'btn btn-ghost btn-block', onClick: () => router.navigate('esercizio/' + ex.id) }, '📈  Vedi storico e grafico'),
+  ]), [
+    { label: 'Annulla', class: 'btn-ghost', onClick: (c) => c() },
+    {
+      label: 'Salva', class: 'btn-primary', onClick: async (c) => {
+        sub.reps = repsIn.value.trim();
+        sub.note = noteIn.value.trim();
+        await store.saveWorkout(w);
+        c();
+        toast('Salvato');
+        rerender();
       },
     },
   ]);
@@ -483,13 +546,13 @@ function supersetMenu(w, day, item) {
       label: 'Rimuovi', class: 'btn-ghost', onClick: async (c) => {
         c();
         const ok = await confirmDialog('Rimuovere la super serie?', 'Verrà tolta da questo giorno.', { okLabel: 'Rimuovi', danger: true });
-        if (ok) { day.items = day.items.filter((x) => x.id !== item.id); await store.saveWorkout(w); router.handleRoute(); }
+        if (ok) { day.items = day.items.filter((x) => x.id !== item.id); await store.saveWorkout(w); rerender(); }
       },
     },
     {
       label: 'Salva', class: 'btn-primary', onClick: async (c) => {
         item.sets = setsIn.value.trim(); item.rest = restIn.value.trim();
-        await store.saveWorkout(w); c(); router.handleRoute();
+        await store.saveWorkout(w); c(); rerender();
       },
     },
   ]);
@@ -525,7 +588,7 @@ async function quickWeight(w, exerciseId) {
         latestCache[exerciseId] = await store.getLatestWeight(exerciseId);
         c();
         toast('Peso aggiornato');
-        router.handleRoute();
+        rerender();
       },
     },
   ]);

@@ -578,3 +578,26 @@ canvas { display: block; width: 100%; touch-action: pan-y; }
   padding: 12px 14px;
   margin-bottom: 14px;
 }
+
+/* ---------------- Flag "prova a caricare di più" ---------------- */
+.ex-row.push-next {
+  border-color: var(--accent);
+  background: rgba(245,158,11,0.07);
+}
+.push-next-mark { font-size: 0.95rem; }
+.pushnext-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.92rem;
+}
+.pushnext-toggle input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+  flex: none;
+}
