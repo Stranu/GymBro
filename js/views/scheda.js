@@ -54,8 +54,8 @@ export async function renderScheda(mount, params) {
     onClick: () => addDay(w),
   }, '+ Aggiungi giorno'));
 
-  // spazio per non far coprire l'ultimo contenuto dalla barra strumenti fissa
-  mount.appendChild(el('div', { style: 'height:120px;' }));
+  // spazio per non far coprire l'ultimo contenuto dalla barra strumenti fissa (compatta)
+  mount.appendChild(el('div', { style: 'height:80px;' }));
 
   // Barra strumenti fissa: contatore serie + timer di recupero
   const defRest = parseRestSeconds((w.defaults || {}).rest) || 90;

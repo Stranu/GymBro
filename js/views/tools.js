@@ -48,45 +48,59 @@ let timerState = {
 
 // riferimenti DOM aggiornati a ogni render
 let refs = {};
+let expanded = false; // stato locale: pannello timer aperto o no
 
 /**
- * Crea la barra strumenti (contatore + timer). Va appesa una sola volta per view.
+ * Barra strumenti compatta (Opzione A): una sola riga con contatore serie a
+ * sinistra e timer a destra. Toccando il tempo si espandono i controlli fini
+ * (−15/+15/↺), che si richiudono da soli all'avvio o con un altro tap.
  * @param {object} opts { defaultRestSeconds }
  */
 export function createToolbar({ defaultRestSeconds } = {}) {
   if (defaultRestSeconds && !timerState.running) timerState.lastPreset = defaultRestSeconds;
 
-  // --- Contatore serie ---
-  const counterValue = el('div', { class: 'tool-count-value', text: String(repCount) });
-  const counter = el('div', { class: 'tool-block' }, [
-    el('div', { class: 'tool-label', text: 'Serie' }),
-    el('div', { class: 'tool-count-row' }, [
-      el('button', { class: 'tool-btn', 'aria-label': 'Meno', onClick: () => setRep(repCount - 1) }, '−'),
+  // --- Contatore serie (compatto) ---
+  const counterValue = el('div', { class: 'tc-count-value', text: String(repCount) });
+  const counter = el('div', { class: 'tc-counter' }, [
+    el('button', { class: 'tc-btn', 'aria-label': 'Meno serie', onClick: () => setRep(repCount - 1) }, '−'),
+    el('div', { class: 'tc-count-wrap', onClick: () => setRep(0), title: 'Tocca per azzerare' }, [
       counterValue,
-      el('button', { class: 'tool-btn', 'aria-label': 'Più', onClick: () => setRep(repCount + 1) }, '+'),
+      el('div', { class: 'tc-count-label', text: 'serie' }),
     ]),
-    el('button', { class: 'tool-reset', onClick: () => setRep(0) }, 'reset'),
+    el('button', { class: 'tc-btn', 'aria-label': 'Più serie', onClick: () => setRep(repCount + 1) }, '+'),
   ]);
 
-  // --- Timer recupero ---
-  const timerDisplay = el('div', { class: 'tool-timer-value', text: fmtTime(timerState.running ? timerState.remaining : timerState.lastPreset) });
-  const startBtn = el('button', { class: 'tool-btn tool-btn-primary', 'aria-label': 'Avvia/Pausa', onClick: toggleTimer }, timerState.running ? '⏸' : '▶');
-  const timer = el('div', { class: 'tool-block' }, [
-    el('div', { class: 'tool-label', text: 'Recupero' }),
-    el('div', { class: 'tool-timer-row' }, [
-      el('button', { class: 'tool-btn tool-btn-sm', 'aria-label': '-15s', onClick: () => adjustTimer(-15) }, '−15'),
-      timerDisplay,
-      el('button', { class: 'tool-btn tool-btn-sm', 'aria-label': '+15s', onClick: () => adjustTimer(15) }, '+15'),
-    ]),
-    el('div', { class: 'tool-timer-actions' }, [
-      startBtn,
-      el('button', { class: 'tool-btn', 'aria-label': 'Azzera', onClick: resetTimer }, '↺'),
-    ]),
+  // --- Timer (compatto + pannello espandibile) ---
+  const timerDisplay = el('div', {
+    class: 'tc-timer-value' + (timerState.running ? ' running' : ''),
+    onClick: toggleTimer, title: 'Avvia / pausa',
+  }, fmtTime(timerState.running ? timerState.remaining : timerState.lastPreset));
+
+  const startBtn = el('button', { class: 'tc-play', 'aria-label': 'Avvia/Pausa', onClick: toggleTimer }, timerState.running ? '⏸' : '▶');
+
+  // riga sempre visibile del timer
+  const timerMain = el('div', { class: 'tc-timer-main' }, [
+    el('button', {
+      class: 'tc-caret', 'aria-label': 'Altri controlli',
+      onClick: () => { expanded = !expanded; syncExpanded(); },
+    }, '⚙'),
+    timerDisplay,
+    startBtn,
   ]);
 
-  const bar = el('div', { class: 'workout-tools' }, [counter, timer]);
+  // pannello espandibile con i controlli fini
+  const panel = el('div', { class: 'tc-panel' }, [
+    el('button', { class: 'tc-btn tc-btn-sm', 'aria-label': '-15s', onClick: () => adjustTimer(-15) }, '−15'),
+    el('button', { class: 'tc-btn tc-btn-sm', 'aria-label': '+15s', onClick: () => adjustTimer(15) }, '+15'),
+    el('button', { class: 'tc-btn tc-btn-sm', 'aria-label': 'Azzera', onClick: resetTimer }, '↺'),
+  ]);
 
-  refs = { counterValue, timerDisplay, startBtn, bar };
+  const timer = el('div', { class: 'tc-timer' }, [panel, timerMain]);
+
+  const bar = el('div', { class: 'workout-tools-compact' }, [counter, timer]);
+
+  refs = { counterValue, timerDisplay, startBtn, bar, panel };
+  syncExpanded();
   // se il timer era in corsa (es. torni sulla scheda) ricollega il tick al nuovo DOM
   if (timerState.running) attachTick();
   return bar;
@@ -95,6 +109,10 @@ export function createToolbar({ defaultRestSeconds } = {}) {
     repCount = Math.max(0, v);
     counterValue.textContent = String(repCount);
     vibrate(10);
+  }
+
+  function syncExpanded() {
+    refs.bar && refs.bar.classList.toggle('tc-expanded', expanded);
   }
 }
 
@@ -109,11 +127,18 @@ function fmtTime(s) {
 function updateTimerDisplay() {
   if (refs.timerDisplay) {
     refs.timerDisplay.textContent = fmtTime(timerState.running ? timerState.remaining : timerState.lastPreset);
+    refs.timerDisplay.classList.toggle('running', timerState.running);
   }
 }
 
 function updateStartBtn() {
   if (refs.startBtn) refs.startBtn.textContent = timerState.running ? '⏸' : '▶';
+}
+
+// richiude il pannello dei controlli fini (usato quando il timer parte)
+function collapsePanel() {
+  expanded = false;
+  if (refs.bar) refs.bar.classList.remove('tc-expanded');
 }
 
 function toggleTimer() {
@@ -130,6 +155,7 @@ function toggleTimer() {
     }
     timerState.running = true;
     attachTick();
+    collapsePanel();
   }
   updateStartBtn();
   updateTimerDisplay();
