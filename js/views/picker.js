@@ -1,6 +1,6 @@
 /* GymBro - selettore esercizio riutilizzabile (autocomplete + filtro tag + crea nuovo) */
 import * as store from '../store.js';
-import { el, clear, openModal, fmtDate } from '../ui.js';
+import { el, clear, openModal, fmtDate, tagFilter } from '../ui.js';
 import { EXERCISE_LIBRARY } from '../exercise-library.js';
 
 /**
@@ -27,44 +27,29 @@ export async function openExercisePicker({ title = 'Scegli esercizio' } = {}) {
   const tags = [...tagSet].sort((a, b) => a.localeCompare(b, 'it'));
 
   return new Promise((resolve) => {
-    let activeTag = null;
+    const activeTags = []; // multi-selezione (AND)
     let resolved = false;
     const done = (val) => { if (!resolved) { resolved = true; resolve(val); } };
 
     const search = el('input', { class: 'input', placeholder: 'Cerca o scrivi un nuovo nome…', autocomplete: 'off' });
     const list = el('div', { class: 'autocomplete-list' });
-    const tagBar = el('div', { style: 'display:flex; flex-wrap:wrap; gap:6px; margin:10px 0;' });
-
-    // barra tag per filtrare
-    const renderTagBar = () => {
-      clear(tagBar);
-      if (!tags.length) return;
-      tagBar.appendChild(el('button', {
-        class: 'tag tag-selectable' + (activeTag == null ? ' active' : ''),
-        text: 'Tutti', onClick: () => { activeTag = null; renderTagBar(); renderList(); },
-      }));
-      tags.forEach((t) => {
-        tagBar.appendChild(el('button', {
-          class: 'tag tag-selectable' + (activeTag === t ? ' active' : ''),
-          text: '#' + t, onClick: () => { activeTag = (activeTag === t ? null : t); renderTagBar(); renderList(); },
-        }));
-      });
-    };
+    const tagBar = tags.length ? tagFilter(tags, activeTags, () => renderList()) : null;
 
     const sectionHead = (text) => el('div', { class: 'ac-section', text });
+    const hasAllTags = (itemTags) => activeTags.every((t) => (itemTags || []).includes(t));
 
     const renderList = () => {
       const q = search.value.trim().toLowerCase();
       clear(list);
 
-      // filtra i TUOI esercizi
+      // filtra i TUOI esercizi (AND sui tag selezionati)
       let mine = exercises;
-      if (activeTag) mine = mine.filter((e) => (e.tags || []).includes(activeTag));
+      if (activeTags.length) mine = mine.filter((e) => hasAllTags(e.tags));
       if (q) mine = mine.filter((e) => e.name.toLowerCase().includes(q));
 
       // filtra i SUGGERITI
       let sugg = suggestions;
-      if (activeTag) sugg = sugg.filter((s) => (s.tags || []).includes(activeTag));
+      if (activeTags.length) sugg = sugg.filter((s) => hasAllTags(s.tags));
       if (q) sugg = sugg.filter((s) => s.name.toLowerCase().includes(q));
 
       // opzione "crea nuovo": solo se c'è testo e nessun match esatto (né tuo né suggerito)
@@ -73,10 +58,10 @@ export async function openExercisePicker({ title = 'Scegli esercizio' } = {}) {
       if (q && !exactMine && !exactSugg) {
         list.appendChild(el('div', {
           class: 'ac-item', style: 'background:rgba(56,189,248,0.08);',
-          onClick: () => { done({ name: search.value.trim(), tags: activeTag ? [activeTag] : [] }); closeModal(); },
+          onClick: () => { done({ name: search.value.trim(), tags: [...activeTags] }); closeModal(); },
         }, [
           el('div', { class: 'ac-name', text: '➕ Crea "' + search.value.trim() + '"' }),
-          el('div', { class: 'ac-sub', text: activeTag ? 'con tag #' + activeTag : 'nuovo esercizio' }),
+          el('div', { class: 'ac-sub', text: activeTags.length ? 'con tag ' + activeTags.map((t) => '#' + t).join(' ') : 'nuovo esercizio' }),
         ]));
       }
 
@@ -127,7 +112,7 @@ export async function openExercisePicker({ title = 'Scegli esercizio' } = {}) {
       tagBar,
       el('p', { class: 'muted small', text: 'Riusa un tuo esercizio (mantiene lo storico), scegline uno suggerito o creane uno nuovo.' }),
       list,
-    ]);
+    ].filter(Boolean));
 
     const modal = openModal(title, body, [
       { label: 'Annulla', class: 'btn-ghost', onClick: (c) => { done(null); c(); } },
@@ -147,7 +132,6 @@ export async function openExercisePicker({ title = 'Scegli esercizio' } = {}) {
       observer.observe(document.getElementById('modalRoot'), { childList: true });
     }
 
-    renderTagBar();
     renderList();
     setTimeout(() => search.focus(), 60);
   });

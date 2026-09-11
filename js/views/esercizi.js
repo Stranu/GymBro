@@ -1,7 +1,7 @@
 /* GymBro - view: catalogo esercizi + dettaglio esercizio con storico/grafico */
 import * as store from '../store.js';
 import * as router from '../router.js';
-import { el, clear, emptyState, openModal, confirmDialog, promptDialog, toast, tagChip, fmtDate } from '../ui.js';
+import { el, clear, emptyState, openModal, confirmDialog, promptDialog, toast, tagChip, fmtDate, tagFilter, tagPickerDialog } from '../ui.js';
 import { lineChart } from '../chart.js';
 
 /* ============ LISTA CATALOGO ============ */
@@ -15,28 +15,25 @@ export async function renderEsercizi(mount) {
     return;
   }
 
-  const state = { q: '', tag: null };
+  const state = { q: '', selected: [] };
   const search = el('input', { class: 'input', placeholder: 'Cerca esercizio…', oninput: (e) => { state.q = e.target.value.toLowerCase(); renderList(); } });
   mount.appendChild(el('div', { class: 'field' }, [search]));
 
-  const tagBar = el('div', { style: 'display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;' });
-  const renderTagBar = () => {
-    clear(tagBar);
-    tagBar.appendChild(el('button', { class: 'tag tag-selectable' + (state.tag == null ? ' active' : ''), text: 'Tutti', onClick: () => { state.tag = null; renderTagBar(); renderList(); } }));
-    tags.forEach((t) => tagBar.appendChild(el('button', { class: 'tag tag-selectable' + (state.tag === t ? ' active' : ''), text: '#' + t, onClick: () => { state.tag = state.tag === t ? null : t; renderTagBar(); renderList(); } })));
-  };
-  if (tags.length) mount.appendChild(tagBar);
+  if (tags.length) mount.appendChild(tagFilter(tags, state.selected, renderList, {
+    hint: 'Selezionando più tag vedi solo gli esercizi che li hanno tutti.',
+  }));
 
   const listWrap = el('div', {});
   mount.appendChild(listWrap);
 
   async function renderList() {
     let filtered = exercises;
-    if (state.tag) filtered = filtered.filter((e) => (e.tags || []).includes(state.tag));
+    // multi-tag AND: deve avere TUTTI i tag selezionati
+    if (state.selected.length) filtered = filtered.filter((e) => state.selected.every((t) => (e.tags || []).includes(t)));
     if (state.q) filtered = filtered.filter((e) => e.name.toLowerCase().includes(state.q));
     clear(listWrap);
-    if (state.tag) {
-      listWrap.appendChild(el('p', { class: 'muted small', text: `${filtered.length} esercizi con #${state.tag}` }));
+    if (state.selected.length) {
+      listWrap.appendChild(el('p', { class: 'muted small', text: `${filtered.length} esercizi con ${state.selected.map((t) => '#' + t).join(' + ')}` }));
     }
     if (filtered.length === 0) {
       listWrap.appendChild(el('p', { class: 'muted', style: 'text-align:center; padding:20px;', text: 'Nessun risultato.' }));
@@ -55,7 +52,6 @@ export async function renderEsercizi(mount) {
     }
   }
 
-  renderTagBar();
   renderList();
 }
 
@@ -67,6 +63,7 @@ export async function renderEsercizio(mount, params) {
   window.setViewTitle(ex.name);
 
   const history = await store.getWeightHistory(id);
+  const knownTags = await store.allTags();
   clear(mount);
 
   // Header con nome + tag
@@ -79,8 +76,13 @@ export async function renderEsercizio(mount, params) {
     tagsWrap.appendChild(el('button', {
       class: 'tag tag-selectable', text: '+ tag',
       onClick: async () => {
-        const t = await promptDialog('Nuovo tag', { label: 'Tag (es. gambe)', placeholder: 'gambe' });
-        if (t) { ex.tags = [...new Set([...(ex.tags || []), store.normalizeTag(t)])]; await store.updateExercise(ex); renderTags(); }
+        const t = await tagPickerDialog(knownTags, ex.tags || [], store.normalizeTag);
+        if (t) {
+          ex.tags = [...new Set([...(ex.tags || []), t])];
+          await store.updateExercise(ex);
+          if (!knownTags.includes(t)) knownTags.push(t);
+          renderTags();
+        }
       },
     }));
   };

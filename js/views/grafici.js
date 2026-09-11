@@ -1,6 +1,6 @@
 /* GymBro - view: grafici per esercizio e per tag (scheda corrente + universale) */
 import * as store from '../store.js';
-import { el, clear, emptyState } from '../ui.js';
+import { el, clear, emptyState, tagFilter } from '../ui.js';
 import { lineChart, PALETTE } from '../chart.js';
 
 export async function renderGrafici(mount) {
@@ -21,7 +21,7 @@ export async function renderGrafici(mount) {
   for (const ex of exercises) histMap[ex.id] = await store.getWeightHistory(ex.id);
 
   // Selettore modalità: scheda corrente vs universale
-  const state = { mode: 'universale', workoutId: null, tag: null };
+  const state = { mode: 'universale', workoutId: null, selected: [] };
   const activeWorkouts = workouts.filter((w) => !w.archived);
   if (activeWorkouts.length) { state.workoutId = activeWorkouts[0].id; }
 
@@ -34,8 +34,8 @@ export async function renderGrafici(mount) {
     clear(controls);
     // toggle modalità
     const toggle = el('div', { style: 'display:flex; gap:8px; margin-bottom:12px;' }, [
-      el('button', { class: 'btn btn-sm ' + (state.mode === 'scheda' ? 'btn-primary' : 'btn-ghost'), style: 'flex:1;', onClick: () => { state.mode = 'scheda'; state.tag = null; renderControls(); renderBody(); } }, 'Scheda corrente'),
-      el('button', { class: 'btn btn-sm ' + (state.mode === 'universale' ? 'btn-primary' : 'btn-ghost'), style: 'flex:1;', onClick: () => { state.mode = 'universale'; state.tag = null; renderControls(); renderBody(); } }, 'Andamento generale'),
+      el('button', { class: 'btn btn-sm ' + (state.mode === 'scheda' ? 'btn-primary' : 'btn-ghost'), style: 'flex:1;', onClick: () => { state.mode = 'scheda'; state.selected.length = 0; renderControls(); renderBody(); } }, 'Scheda corrente'),
+      el('button', { class: 'btn btn-sm ' + (state.mode === 'universale' ? 'btn-primary' : 'btn-ghost'), style: 'flex:1;', onClick: () => { state.mode = 'universale'; state.selected.length = 0; renderControls(); renderBody(); } }, 'Andamento generale'),
     ]);
     controls.appendChild(toggle);
 
@@ -43,18 +43,11 @@ export async function renderGrafici(mount) {
       if (!activeWorkouts.length) {
         controls.appendChild(el('p', { class: 'muted small', text: 'Nessuna scheda attiva.' }));
       } else {
-        const sel = el('select', { class: 'input', onChange: (e) => { state.workoutId = e.target.value; state.tag = null; renderBody(); } },
+        const sel = el('select', { class: 'input', onChange: (e) => { state.workoutId = e.target.value; state.selected.length = 0; renderBody(); } },
           activeWorkouts.map((w) => el('option', { value: w.id, ...(w.id === state.workoutId ? { selected: 'selected' } : {}) }, w.name)));
         controls.appendChild(el('div', { class: 'field' }, [el('label', { text: 'Scheda' }), sel]));
       }
     }
-  }
-
-  function tagFilterBar(availableTags, onPick) {
-    const bar = el('div', { style: 'display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;' });
-    bar.appendChild(el('button', { class: 'tag tag-selectable' + (state.tag == null ? ' active' : ''), text: 'Tutti i tag', onClick: () => { state.tag = null; onPick(); } }));
-    availableTags.forEach((t) => bar.appendChild(el('button', { class: 'tag tag-selectable' + (state.tag === t ? ' active' : ''), text: '#' + t, onClick: () => { state.tag = state.tag === t ? null : t; onPick(); } })));
-    return bar;
   }
 
   function drawExerciseCharts(exList, container) {
@@ -62,10 +55,11 @@ export async function renderGrafici(mount) {
     const tagSet = new Set();
     exList.forEach((ex) => (ex.tags || []).forEach((t) => tagSet.add(t)));
     let tagList = [...tagSet].sort((a, b) => a.localeCompare(b, 'it'));
-    if (state.tag) tagList = tagList.filter((t) => t === state.tag);
+    // se sono selezionati dei tag, mostra solo i grafici di quei tag
+    if (state.selected.length) tagList = tagList.filter((t) => state.selected.includes(t));
 
-    // esercizi senza tag: mostrati singolarmente se nessun filtro tag attivo
-    if (!state.tag) {
+    // esercizi senza tag: mostrati singolarmente solo se nessun filtro attivo
+    if (!state.selected.length) {
       const untagged = exList.filter((ex) => !(ex.tags || []).length && (histMap[ex.id] || []).some((h) => h.value != null));
       if (untagged.length) {
         container.appendChild(el('div', { class: 'section-head' }, [el('h2', { text: 'Senza tag' })]));
@@ -73,7 +67,7 @@ export async function renderGrafici(mount) {
       }
     }
 
-    if (tagList.length === 0 && !state.tag) return;
+    if (tagList.length === 0) return;
 
     tagList.forEach((tag) => {
       const inTag = exList.filter((ex) => (ex.tags || []).includes(tag));
@@ -117,8 +111,11 @@ export async function renderGrafici(mount) {
   function renderBody() {
     clear(body);
     if (state.mode === 'universale') {
-      body.appendChild(el('p', { class: 'muted small', text: 'Tutto lo storico, tra tutte le schede. Filtra per tag per confrontare esercizi dello stesso gruppo.' }));
-      body.appendChild(tagFilterBar(tags, renderBody));
+      body.appendChild(el('p', { class: 'muted small', text: 'Tutto lo storico, tra tutte le schede.' }));
+      if (tags.length) body.appendChild(tagFilter(tags, state.selected, renderBody, {
+        label: 'Mostra gruppi',
+        hint: 'Seleziona i gruppi muscolari da mostrare. Se non selezioni nulla vedi tutti i grafici.',
+      }));
       drawExerciseCharts(exercises, body);
     } else {
       const w = workouts.find((x) => x.id === state.workoutId);
@@ -143,8 +140,10 @@ export async function renderGrafici(mount) {
         body.appendChild(card);
       }
 
-      const availTags = countTags;
-      body.appendChild(tagFilterBar(availTags, renderBody));
+      if (countTags.length) body.appendChild(tagFilter(countTags, state.selected, renderBody, {
+        label: 'Mostra gruppi',
+        hint: 'Seleziona i gruppi muscolari da mostrare. Se non selezioni nulla vedi tutti i grafici.',
+      }));
       drawExerciseCharts(exList, body);
     }
   }

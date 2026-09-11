@@ -162,6 +162,118 @@ export function tagChip(tag, { onRemove } = {}) {
   ].filter(Boolean));
 }
 
+/**
+ * Barra di filtro tag collassabile con multi-selezione.
+ * @param {string[]} tags       elenco tag disponibili
+ * @param {string[]} selected   array MUTABILE dei tag selezionati (viene aggiornato in-place)
+ * @param {function} onChange   callback chiamata quando la selezione cambia
+ * @param {object} [opts]        { label, hint } etichette personalizzabili
+ * @returns {HTMLElement}
+ */
+export function tagFilter(tags, selected, onChange, opts = {}) {
+  const label = opts.label || 'Filtra per tag';
+  const hint = opts.hint || '';
+  const wrap = el('div', { class: 'tag-filter' });
+  let open = false;
+
+  const render = () => {
+    clear(wrap);
+    if (!tags.length) return;
+
+    const count = selected.length;
+    const toggle = el('button', {
+      class: 'tag-filter-toggle' + (count ? ' has-sel' : ''),
+      onClick: () => { open = !open; render(); },
+    }, [
+      el('span', { text: count ? `${label}: ${count}` : label }),
+      el('span', { class: 'tag-filter-caret', text: open ? '▴' : '▾' }),
+    ]);
+    wrap.appendChild(toggle);
+
+    if (open && hint) {
+      wrap.appendChild(el('p', { class: 'muted small', style: 'margin:6px 0 0;', text: hint }));
+    }
+
+    if (count && !open) {
+      // riepilogo compatto dei selezionati quando chiuso
+      const summary = el('div', { class: 'tag-filter-summary' },
+        selected.map((t) => el('span', { class: 'tag', text: '#' + t })));
+      summary.appendChild(el('button', { class: 'tag-filter-clear', text: 'azzera', onClick: () => { selected.length = 0; render(); onChange(); } }));
+      wrap.appendChild(summary);
+    }
+
+    if (open) {
+      const panel = el('div', { class: 'tag-filter-panel' });
+      tags.forEach((t) => {
+        const on = selected.includes(t);
+        panel.appendChild(el('button', {
+          class: 'tag tag-selectable' + (on ? ' active' : ''),
+          text: '#' + t,
+          onClick: () => {
+            const i = selected.indexOf(t);
+            if (i >= 0) selected.splice(i, 1); else selected.push(t);
+            render();
+            onChange();
+          },
+        }));
+      });
+      wrap.appendChild(panel);
+      if (count) {
+        wrap.appendChild(el('button', { class: 'tag-filter-clear', style: 'margin-top:6px;', text: 'Azzera selezione', onClick: () => { selected.length = 0; render(); onChange(); } }));
+      }
+    }
+  };
+
+  render();
+  return wrap;
+}
+
+/**
+ * Dialog per aggiungere un tag a un esercizio: mostra i tag esistenti cliccabili
+ * più un campo per crearne uno nuovo. Ritorna Promise<string|null> (tag normalizzato).
+ * @param {string[]} existingTags   tutti i tag già usati nel catalogo
+ * @param {string[]} alreadyOn      tag già presenti su questo esercizio (mostrati come attivi/disabilitati)
+ * @param {function} normalize      funzione di normalizzazione tag
+ */
+export function tagPickerDialog(existingTags, alreadyOn, normalize) {
+  return new Promise((resolve) => {
+    const input = el('input', { class: 'input', placeholder: 'nuovo tag (es. gambe)', autocomplete: 'off' });
+    const listWrap = el('div', { class: 'tag-picker-list' });
+
+    const renderChips = () => {
+      clear(listWrap);
+      const q = normalize(input.value);
+      const shown = existingTags.filter((t) => !q || t.includes(q));
+      if (!shown.length) {
+        listWrap.appendChild(el('p', { class: 'muted small', text: 'Nessun tag esistente corrispondente.' }));
+      }
+      shown.forEach((t) => {
+        const on = alreadyOn.includes(t);
+        listWrap.appendChild(el('button', {
+          class: 'tag tag-selectable' + (on ? ' active' : ''),
+          text: '#' + t + (on ? ' ✓' : ''),
+          onClick: () => { if (!on) { close(); resolve(t); } },
+        }));
+      });
+    };
+    input.addEventListener('input', renderChips);
+
+    const body = el('div', {}, [
+      el('div', { class: 'field' }, [el('label', { text: 'Crea nuovo tag' }), input]),
+      el('p', { class: 'muted small', text: 'Oppure scegli un tag già esistente:' }),
+      listWrap,
+    ]);
+
+    const m = openModal('Aggiungi tag', body, [
+      { label: 'Annulla', class: 'btn-ghost', onClick: (c) => { c(); resolve(null); } },
+      { label: 'Crea', class: 'btn-primary', onClick: (c) => { const v = normalize(input.value); c(); resolve(v || null); } },
+    ]);
+    const close = () => m.close();
+    renderChips();
+    setTimeout(() => input.focus(), 60);
+  });
+}
+
 export function emptyState(icon, text, actionNode = null) {
   return el('div', { class: 'empty' }, [
     el('div', { class: 'empty-icon', text: icon }),
