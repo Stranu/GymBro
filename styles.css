@@ -465,6 +465,7 @@ canvas { display: block; width: 100%; touch-action: pan-y; }
   cursor: pointer;
 }
 .tc-timer-value.running { color: var(--accent); }
+.tc-timer-value.paused { color: var(--accent); opacity: 0.6; }
 .tc-play {
   background: var(--primary);
   color: #04222e;

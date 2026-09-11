@@ -126,8 +126,12 @@ function fmtTime(s) {
 
 function updateTimerDisplay() {
   if (refs.timerDisplay) {
-    refs.timerDisplay.textContent = fmtTime(timerState.running ? timerState.remaining : timerState.lastPreset);
+    // mostra il tempo rimanente sia in marcia sia in pausa (remaining > 0);
+    // torna al preset solo quando è davvero azzerato (reset o mai avviato).
+    const showRemaining = timerState.running || timerState.remaining > 0;
+    refs.timerDisplay.textContent = fmtTime(showRemaining ? timerState.remaining : timerState.lastPreset);
     refs.timerDisplay.classList.toggle('running', timerState.running);
+    refs.timerDisplay.classList.toggle('paused', !timerState.running && timerState.remaining > 0);
   }
 }
 

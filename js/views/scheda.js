@@ -2,7 +2,7 @@
 import * as store from '../store.js';
 import * as router from '../router.js';
 import {
-  el, clear, openModal, confirmDialog, promptDialog, toast, emptyState, tagChip, progressBadge, fmtDate,
+  el, clear, openModal, confirmDialog, promptDialog, toast, emptyState, tagChip, progressBadge, fmtDate, tagPickerDialog,
 } from '../ui.js';
 import { openExercisePicker } from './picker.js';
 import { createToolbar, teardownTools, startTimerWith } from './tools.js';
@@ -427,6 +427,7 @@ async function openExerciseSheet(w, day, item) {
   const ex = await store.getExercise(item.exerciseId);
   if (!ex) return;
   const d = w.defaults || {};
+  const knownTags = await store.allTags();
 
   const nameIn = el('input', { class: 'input', value: ex.name, placeholder: 'Nome esercizio' });
   const setsIn = el('input', { class: 'input', value: item.sets || '', placeholder: d.sets || '3' });
@@ -443,8 +444,13 @@ async function openExerciseSheet(w, day, item) {
     tagsWrap.appendChild(el('button', {
       class: 'tag tag-selectable', text: '+ tag',
       onClick: async () => {
-        const t = await promptDialog('Nuovo tag', { label: 'Tag (es. gambe, deltoidi)', placeholder: 'gambe' });
-        if (t) { ex.tags = [...new Set([...(ex.tags || []), store.normalizeTag(t)])]; await store.updateExercise(ex); renderTags(); }
+        const t = await tagPickerDialog(knownTags, ex.tags || [], store.normalizeTag);
+        if (t) {
+          ex.tags = [...new Set([...(ex.tags || []), t])];
+          await store.updateExercise(ex);
+          if (!knownTags.includes(t)) knownTags.push(t);
+          renderTags();
+        }
       },
     }));
   };
