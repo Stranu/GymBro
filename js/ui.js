@@ -274,6 +274,20 @@ export function tagPickerDialog(existingTags, alreadyOn, normalize) {
   });
 }
 
+/**
+ * Piccolo badge di progresso peso: ↑ verde / ↓ rosso / = grigio.
+ * @param {number} delta  differenza (kg) rispetto alla registrazione precedente
+ * @returns {HTMLElement|null}
+ */
+export function progressBadge(delta) {
+  if (delta == null || Number.isNaN(delta)) return null;
+  let cls, label;
+  if (delta > 0) { cls = 'progress-up'; label = `↑ +${delta} kg`; }
+  else if (delta < 0) { cls = 'progress-down'; label = `↓ ${delta} kg`; }
+  else { cls = 'progress-flat'; label = '= invariato'; }
+  return el('span', { class: 'progress-badge ' + cls, title: 'Rispetto alla volta precedente' }, label);
+}
+
 export function emptyState(icon, text, actionNode = null) {
   return el('div', { class: 'empty' }, [
     el('div', { class: 'empty-icon', text: icon }),

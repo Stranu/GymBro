@@ -12,6 +12,11 @@ export async function renderSchede(mount) {
 
   clear(mount);
 
+  // Promemoria backup discreto (dismissibile per la sessione)
+  if (!backupReminderDismissed && await store.shouldRemindBackup(30)) {
+    mount.appendChild(backupBanner());
+  }
+
   if (workouts.length === 0) {
     mount.appendChild(
       emptyState('📋', 'Nessuna scheda ancora. Creane una per iniziare.',
@@ -43,6 +48,23 @@ export async function renderSchede(mount) {
 
 function sectionHead(text) {
   return el('div', { class: 'section-head' }, [el('h2', { text })]);
+}
+
+// dismiss valido finché l'app resta aperta (non insistente)
+let backupReminderDismissed = false;
+
+function backupBanner() {
+  const banner = el('div', { class: 'backup-banner' }, [
+    el('div', { style: 'flex:1;' }, [
+      el('div', { style: 'font-weight:600;', text: '💾 Fai un backup' }),
+      el('div', { class: 'small muted', text: 'I dati stanno solo su questo telefono. Salvane una copia per sicurezza.' }),
+    ]),
+    el('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [
+      el('button', { class: 'btn btn-sm btn-primary', onClick: () => router.navigate('impostazioni') }, 'Esporta'),
+      el('button', { class: 'btn btn-sm btn-ghost', onClick: () => { backupReminderDismissed = true; banner.remove(); } }, 'Più tardi'),
+    ]),
+  ]);
+  return banner;
 }
 
 function countExercises(w) {

@@ -1,16 +1,18 @@
 /* GymBro - view: impostazioni / backup / info */
 import * as store from '../store.js';
 import * as router from '../router.js';
-import { el, clear, toast, confirmDialog } from '../ui.js';
+import { el, clear, toast, confirmDialog, fmtDate } from '../ui.js';
 
 export async function renderImpostazioni(mount) {
   window.setViewTitle('Altro');
   clear(mount);
 
   // --- Backup ---
+  const lastBackup = await store.getLastBackup();
   mount.appendChild(el('div', { class: 'section-head' }, [el('h2', { text: 'Backup dati' })]));
   mount.appendChild(el('div', { class: 'card' }, [
     el('p', { class: 'muted small', text: 'I dati sono salvati solo su questo dispositivo. Esporta un backup ogni tanto per non perderli.' }),
+    el('p', { class: 'small', style: 'margin:6px 0 0;' + (lastBackup ? '' : 'color:var(--accent);'), text: lastBackup ? 'Ultimo backup: ' + fmtDate(lastBackup) : 'Non hai ancora fatto un backup.' }),
     el('div', { class: 'spacer' }),
     el('button', { class: 'btn btn-primary btn-block', onClick: exportBackup }, '⬇️  Esporta backup (.json)'),
     el('div', { class: 'spacer' }),
@@ -53,6 +55,7 @@ async function exportBackup() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  await store.markBackupDone();
   toast('Backup esportato');
 }
 

@@ -151,6 +151,19 @@ export async function getLatestWeight(exerciseId) {
 }
 
 /**
+ * Progresso rispetto alla registrazione numerica precedente.
+ * Ritorna { delta, latest, previous } oppure null se non calcolabile
+ * (meno di due valori numerici). delta = ultimo - penultimo.
+ */
+export async function getWeightProgress(exerciseId) {
+  const hist = (await getWeightHistory(exerciseId)).filter((h) => h.value != null);
+  if (hist.length < 2) return null;
+  const latest = hist[hist.length - 1];
+  const previous = hist[hist.length - 2];
+  return { delta: Math.round((latest.value - previous.value) * 100) / 100, latest, previous };
+}
+
+/**
  * Registra un peso per un esercizio. Se esiste già una voce nella stessa data
  * per lo stesso esercizio, la aggiorna (evita duplicati nello stesso giorno).
  */
@@ -220,6 +233,30 @@ export async function getMeta(key, fallback = null) {
 
 export async function setMeta(key, value) {
   await db.put('meta', { key, value });
+}
+
+/* ---------------- Tracciamento backup ---------------- */
+
+export async function markBackupDone() {
+  await setMeta('lastBackup', new Date().toISOString());
+}
+
+export async function getLastBackup() {
+  return getMeta('lastBackup', null);
+}
+
+/**
+ * true se conviene ricordare un backup: mai fatto (e ci sono dati) oppure
+ * ultimo backup più vecchio di `days` giorni.
+ */
+export async function shouldRemindBackup(days = 30) {
+  const workouts = await db.getAll('workouts');
+  const logs = await db.getAll('weightLog');
+  if (workouts.length === 0 && logs.length === 0) return false; // niente da salvare
+  const last = await getLastBackup();
+  if (!last) return true;
+  const ageDays = (Date.now() - new Date(last).getTime()) / 86400000;
+  return ageDays >= days;
 }
 
 export { db };

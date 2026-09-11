@@ -2,14 +2,15 @@
 import * as store from '../store.js';
 import * as router from '../router.js';
 import {
-  el, clear, openModal, confirmDialog, promptDialog, toast, emptyState, tagChip,
+  el, clear, openModal, confirmDialog, promptDialog, toast, emptyState, tagChip, progressBadge, fmtDate,
 } from '../ui.js';
 import { openExercisePicker } from './picker.js';
 import { createToolbar, teardownTools, startTimerWith } from './tools.js';
 
-// cache dei pesi più recenti e dei nomi per exerciseId (evita query ripetute e flicker durante il render)
+// cache dei pesi più recenti, dei nomi e del progresso per exerciseId (evita query ripetute e flicker durante il render)
 let latestCache = {};
 let nameCache = {};
+let progressCache = {};
 
 /** Estrae i secondi di recupero da un testo libero tipo "2-3 min", "90s", "1:30". */
 function parseRestSeconds(text) {
@@ -77,6 +78,7 @@ function registerTeardown() {
 async function preloadLatest(w) {
   latestCache = {};
   nameCache = {};
+  progressCache = {};
   const ids = new Set();
   (w.days || []).forEach((d) => (d.items || []).forEach((it) => {
     if (it.type === 'superset') (it.exercises || []).forEach((s) => ids.add(s.exerciseId));
@@ -84,6 +86,7 @@ async function preloadLatest(w) {
   }));
   for (const exId of ids) {
     latestCache[exId] = await store.getLatestWeight(exId);
+    progressCache[exId] = await store.getWeightProgress(exId);
     const ex = await store.getExercise(exId);
     nameCache[exId] = ex ? ex.name : '(esercizio)';
   }
@@ -222,11 +225,10 @@ function renderSingle(w, day, item) {
         (item.note ? el('span', { text: (meta ? ' · ' : '') + item.note }) : null),
       ].filter(Boolean)),
     ]),
-    el('div', {
-      class: 'ex-weight',
-      onClick: () => quickWeight(w, item.exerciseId),
-      title: 'Aggiorna peso',
-    }, wLabel),
+    el('div', { class: 'ex-weight-col', onClick: () => quickWeight(w, item.exerciseId), title: 'Aggiorna peso' }, [
+      el('div', { class: 'ex-weight' }, wLabel),
+      progressCache[item.exerciseId] ? progressBadge(progressCache[item.exerciseId].delta) : null,
+    ].filter(Boolean)),
   ]);
 }
 
@@ -243,7 +245,10 @@ function renderSuperset(w, day, item) {
         el('div', { class: 'ex-name', text: exName(sub.exerciseId) }),
         el('div', { class: 'ex-meta', text: [sub.reps ? sub.reps + ' rip' : '', sub.note || ''].filter(Boolean).join(' · ') }),
       ]),
-      el('div', { class: 'ex-weight', onClick: () => quickWeight(w, sub.exerciseId), title: 'Aggiorna peso' }, wLabel),
+      el('div', { class: 'ex-weight-col', onClick: () => quickWeight(w, sub.exerciseId), title: 'Aggiorna peso' }, [
+        el('div', { class: 'ex-weight' }, wLabel),
+        progressCache[sub.exerciseId] ? progressBadge(progressCache[sub.exerciseId].delta) : null,
+      ].filter(Boolean)),
     ]);
   });
 
@@ -494,6 +499,7 @@ function supersetMenu(w, day, item) {
 async function quickWeight(w, exerciseId) {
   const ex = await store.getExercise(exerciseId);
   const latest = await store.getLatestWeight(exerciseId);
+  const progress = await store.getWeightProgress(exerciseId);
   const valIn = el('input', { class: 'input', type: 'number', inputmode: 'decimal', step: '0.5', value: latest && latest.value != null ? latest.value : '', placeholder: 'es. 50' });
   const noteIn = el('input', { class: 'input', value: latest ? (latest.note || '') : '', placeholder: 'es. per lato, elastico...' });
   const dateIn = el('input', { class: 'input', type: 'date', value: store.todayISO() });
@@ -502,7 +508,10 @@ async function quickWeight(w, exerciseId) {
     el('div', { class: 'field' }, [el('label', { text: 'Peso (kg)' }), valIn]),
     el('div', { class: 'field' }, [el('label', { text: 'Nota' }), noteIn]),
     el('div', { class: 'field' }, [el('label', { text: 'Data' }), dateIn]),
-    latest ? el('p', { class: 'muted small', text: `Ultimo: ${latest.value != null ? latest.value + ' kg' : (latest.note || '-')} (${latest.date})` }) : null,
+    latest ? el('p', { class: 'muted small', style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
+      el('span', { text: `Ultimo: ${latest.value != null ? latest.value + ' kg' : (latest.note || '-')} (${fmtDate(latest.date)})` }),
+      progress ? progressBadge(progress.delta) : null,
+    ].filter(Boolean)) : null,
   ].filter(Boolean)), [
     { label: 'Annulla', class: 'btn-ghost', onClick: (c) => c() },
     {

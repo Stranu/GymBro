@@ -523,3 +523,34 @@ canvas { display: block; width: 100%; touch-action: pan-y; }
   overflow-y: auto;
   padding: 4px 0;
 }
+
+/* ---------------- Badge di progresso peso ---------------- */
+.ex-weight-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  cursor: pointer;
+}
+.progress-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+.progress-up { background: rgba(34,197,94,0.15); color: var(--success); }
+.progress-down { background: rgba(239,68,68,0.15); color: var(--danger); }
+.progress-flat { background: var(--bg-elev-2); color: var(--text-dim); }
+
+/* ---------------- Banner promemoria backup ---------------- */
+.backup-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
