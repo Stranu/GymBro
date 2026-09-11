@@ -229,22 +229,20 @@ function renderSingle(w, day, item) {
     ? `${latest.value} kg`
     : (latest && latest.note ? latest.note : '—');
 
-  return el('div', { class: 'ex-row' + (item.pushNext ? ' push-next' : '') }, [
+  return el('div', { class: 'ex-row' }, [
     dragHandle(),
     el('div', { class: 'ex-main', onClick: () => openExerciseSheet(w, day, item) }, [
-      el('div', { class: 'ex-name' }, [
-        item.pushNext ? el('span', { class: 'push-next-mark', title: 'Prossima volta prova a caricare di più', text: '🔼 ' }) : null,
-        el('span', { text: name }),
-      ].filter(Boolean)),
+      el('div', { class: 'ex-name', text: name }),
       el('div', { class: 'ex-meta' }, [
         meta ? el('span', { text: meta }) : null,
         (item.note ? el('span', { text: (meta ? ' · ' : '') + item.note }) : null),
       ].filter(Boolean)),
     ]),
     el('div', { class: 'ex-weight-col', onClick: () => quickWeight(w, item.exerciseId), title: 'Aggiorna peso' }, [
-      el('div', { class: 'ex-weight' }, wLabel),
+      el('div', { class: 'ex-weight' + (item.pushNext ? ' push-next-weight' : '') }, wLabel),
       progressCache[item.exerciseId] ? progressBadge(progressCache[item.exerciseId].delta) : null,
     ].filter(Boolean)),
+    el('button', { class: 'icon-btn ex-menu-btn', 'aria-label': 'Opzioni esercizio', onClick: (e) => { e.stopPropagation(); exerciseMenu(w, day, item, item.exerciseId); } }, '⋮'),
   ]);
 }
 
@@ -253,36 +251,41 @@ function dragHandle() {
 }
 
 /**
- * Toggle "prossima volta prova a caricare di più".
- * Mutato in-memory sull'item; viene persistito dal Salva del foglio.
- * @param {object} target  item singolo o sub-esercizio di una superset
+ * Menu "⋮" di un esercizio (singolo o sub-superset): timer, storico, segna da aumentare.
+ * @param {object} target  item singolo o sub-esercizio (contiene exerciseId + pushNext)
  */
-function pushNextToggle(target) {
-  const box = el('input', { type: 'checkbox' });
-  box.checked = !!target.pushNext;
-  box.addEventListener('change', () => { target.pushNext = box.checked; });
-  return el('label', { class: 'pushnext-toggle' }, [
-    box,
-    el('span', {}, '🔼  Prossima volta prova a caricare di più'),
+function exerciseMenu(w, day, target, exerciseId) {
+  const body = el('div', {}, [
+    mBtn('⏱️  Avvia timer recupero', () => {
+      const secs = parseRestSeconds(target.rest || (w.defaults || {}).rest) || 90;
+      startTimerWith(secs);
+      toast('Timer recupero avviato');
+    }),
+    mBtn('📈  Vedi storico e grafico', () => router.navigate('esercizio/' + exerciseId)),
+    mBtn((target.pushNext ? '🔽  Togli da aumentare' : '🔼  Segna da aumentare'), async () => {
+      target.pushNext = !target.pushNext;
+      await store.saveWorkout(w);
+      toast(target.pushNext ? 'Segnato da aumentare' : 'Rimosso');
+      rerender();
+    }),
   ]);
+  openModal('Opzioni', body);
 }
 
 function renderSuperset(w, day, item) {
   const rows = (item.exercises || []).map((sub) => {
     const latest = latestCache[sub.exerciseId];
     const wLabel = latest && latest.value != null ? `${latest.value} kg` : (latest && latest.note ? latest.note : '—');
-    return el('div', { class: 'ex-row' + (sub.pushNext ? ' push-next' : '') }, [
+    return el('div', { class: 'ex-row' }, [
       el('div', { class: 'ex-main', onClick: () => openSupersetSubSheet(w, day, item, sub) }, [
-        el('div', { class: 'ex-name' }, [
-          sub.pushNext ? el('span', { class: 'push-next-mark', title: 'Prossima volta prova a caricare di più', text: '🔼 ' }) : null,
-          el('span', { text: exName(sub.exerciseId) }),
-        ].filter(Boolean)),
+        el('div', { class: 'ex-name', text: exName(sub.exerciseId) }),
         el('div', { class: 'ex-meta', text: [sub.reps ? sub.reps + ' rip' : '', sub.note || ''].filter(Boolean).join(' · ') }),
       ]),
       el('div', { class: 'ex-weight-col', onClick: () => quickWeight(w, sub.exerciseId), title: 'Aggiorna peso' }, [
-        el('div', { class: 'ex-weight' }, wLabel),
+        el('div', { class: 'ex-weight' + (sub.pushNext ? ' push-next-weight' : '') }, wLabel),
         progressCache[sub.exerciseId] ? progressBadge(progressCache[sub.exerciseId].delta) : null,
       ].filter(Boolean)),
+      el('button', { class: 'icon-btn ex-menu-btn', 'aria-label': 'Opzioni esercizio', onClick: (e) => { e.stopPropagation(); exerciseMenu(w, day, sub, sub.exerciseId); } }, '⋮'),
     ]);
   });
 
@@ -457,15 +460,6 @@ async function openExerciseSheet(w, day, item) {
     el('div', { class: 'field' }, [el('label', { text: 'Recupero' }), restIn]),
     el('div', { class: 'field' }, [el('label', { text: 'Note' }), noteIn]),
     el('div', { class: 'field' }, [el('label', { text: 'Tag muscolari' }), tagsWrap]),
-    pushNextToggle(item),
-    el('div', { class: 'divider' }),
-    el('button', { class: 'btn btn-ghost btn-block', style: 'margin-bottom:8px;', onClick: () => {
-      const secs = parseRestSeconds(item.rest || (w.defaults || {}).rest) || 90;
-      startTimerWith(secs);
-      document.querySelector('.modal-backdrop')?.remove();
-      toast('Timer recupero avviato');
-    } }, '⏱️  Avvia timer recupero'),
-    el('button', { class: 'btn btn-ghost btn-block', onClick: () => router.navigate('esercizio/' + ex.id) }, '📈  Vedi storico e grafico'),
   ]), [
     {
       label: 'Rimuovi', class: 'btn-ghost', onClick: async (c) => {
@@ -514,9 +508,6 @@ async function openSupersetSubSheet(w, day, item, sub) {
   openModal(ex.name + ' · super serie', el('div', {}, [
     el('div', { class: 'field' }, [el('label', { text: 'Ripetizioni' }), repsIn]),
     el('div', { class: 'field' }, [el('label', { text: 'Note' }), noteIn]),
-    pushNextToggle(sub),
-    el('div', { class: 'divider' }),
-    el('button', { class: 'btn btn-ghost btn-block', onClick: () => router.navigate('esercizio/' + ex.id) }, '📈  Vedi storico e grafico'),
   ]), [
     { label: 'Annulla', class: 'btn-ghost', onClick: (c) => c() },
     {
