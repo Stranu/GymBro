@@ -592,3 +592,7 @@ canvas { display: block; width: 100%; touch-action: pan-y; }
   flex: none;
   color: var(--text-dim);
 }
+
+/* giorno segnato come fatto questa settimana */
+.day-name { display: inline-flex; align-items: center; }
+.day-name.day-done { color: var(--success); }

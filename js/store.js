@@ -15,6 +15,11 @@ export function normalizeTag(t) {
   return String(t).trim().replace(/^#/, '').toLowerCase().replace(/\s+/g, '-');
 }
 
+/** Un giorno è "fatto" se ha il flag done (resta finché non lo togli a mano). */
+export function isDayDone(day) {
+  return !!(day && day.done);
+}
+
 /* ---------------- SCHEDE (workouts) ---------------- */
 
 export async function listWorkouts() {
@@ -222,6 +227,108 @@ export async function importData(json, { replace = true } = {}) {
   await db.putMany('weightLog', weightLog);
   await db.putMany('workouts', workouts);
   return { workouts: workouts.length, exercises: exercises.length, weightLog: weightLog.length };
+}
+
+/* ---------------- EXPORT / IMPORT SINGOLA SCHEDA ---------------- */
+
+/** Raccoglie gli exerciseId referenziati da una scheda. */
+function exerciseIdsInWorkout(w) {
+  const ids = new Set();
+  (w.days || []).forEach((d) => (d.items || []).forEach((it) => {
+    if (it.type === 'superset') (it.exercises || []).forEach((s) => ids.add(s.exerciseId));
+    else if (it.exerciseId) ids.add(it.exerciseId);
+  }));
+  return [...ids];
+}
+
+/**
+ * Esporta una singola scheda con gli esercizi usati e il loro storico pesi.
+ * Adatto a passare una scheda tra utenti.
+ */
+export async function exportWorkout(id) {
+  const w = await getWorkout(id);
+  if (!w) throw new Error('Scheda non trovata');
+  const ids = exerciseIdsInWorkout(w);
+  const [allEx, allLogs] = await Promise.all([db.getAll('exercises'), db.getAll('weightLog')]);
+  const exercises = allEx.filter((e) => ids.includes(e.id));
+  const weightLog = allLogs.filter((l) => ids.includes(l.exerciseId));
+  return {
+    app: 'GymBro',
+    version: 1,
+    kind: 'workout',
+    exportedAt: new Date().toISOString(),
+    data: { workout: w, exercises, weightLog },
+  };
+}
+
+/**
+ * Importa una singola scheda SENZA cancellare i dati esistenti (merge).
+ * - gli esercizi vengono fusi per nome (niente doppioni); i nuovi vengono creati
+ * - lo storico pesi degli esercizi già esistenti NON viene toccato; per i nuovi
+ *   esercizi viene importato
+ * - la scheda viene aggiunta come nuova (id rigenerato)
+ */
+export async function importWorkout(json) {
+  if (!json || json.kind !== 'workout' || !json.data || !json.data.workout) {
+    throw new Error('File non valido: non è una singola scheda');
+  }
+  const { workout, exercises = [], weightLog = [] } = json.data;
+  const existing = await db.getAll('exercises');
+  const byName = new Map(existing.map((e) => [e.name.toLowerCase(), e]));
+
+  // mappa vecchioExerciseId -> nuovoExerciseId (dopo dedup/creazione)
+  const idMap = {};
+  for (const src of exercises) {
+    const found = byName.get(src.name.toLowerCase());
+    if (found) {
+      // esercizio già presente: unisci eventuali nuovi tag, mantieni il suo storico
+      const mergedTags = [...new Set([...(found.tags || []), ...(src.tags || [])])];
+      if (mergedTags.length !== (found.tags || []).length) {
+        found.tags = mergedTags;
+        await db.put('exercises', found);
+      }
+      idMap[src.id] = found.id;
+    } else {
+      // nuovo esercizio: crea con id nuovo e importa il suo storico
+      const newId = uid();
+      idMap[src.id] = newId;
+      const ex = { id: newId, name: src.name, nameLower: src.name.toLowerCase(), tags: src.tags || [], createdAt: new Date().toISOString() };
+      await db.put('exercises', ex);
+      byName.set(ex.nameLower, ex);
+      // importa lo storico solo per i nuovi esercizi
+      const logs = weightLog.filter((l) => l.exerciseId === src.id);
+      for (const l of logs) {
+        await db.put('weightLog', { ...l, id: uid(), exerciseId: newId });
+      }
+    }
+  }
+
+  // ricostruisci la scheda con i riferimenti rimappati e id nuovi
+  const now = new Date().toISOString();
+  const nw = {
+    ...workout,
+    id: uid(),
+    archived: false,
+    createdAt: now,
+    updatedAt: now,
+    days: (workout.days || []).map((d) => ({
+      ...d,
+      id: uid(),
+      done: false, // reset stato "fatto" all'import
+      items: (d.items || []).map((it) => {
+        const copy = { ...it, id: uid() };
+        if (it.type === 'superset') {
+          copy.exercises = (it.exercises || []).map((s) => ({ ...s, exerciseId: idMap[s.exerciseId] || s.exerciseId, pushNext: false }));
+        } else {
+          copy.exerciseId = idMap[it.exerciseId] || it.exerciseId;
+          copy.pushNext = false;
+        }
+        return copy;
+      }),
+    })),
+  };
+  await db.put('workouts', nw);
+  return { name: nw.name, newExercises: Object.values(idMap).length };
 }
 
 /* ---------------- META (stato app) ---------------- */

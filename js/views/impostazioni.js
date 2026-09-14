@@ -17,11 +17,26 @@ export async function renderImpostazioni(mount) {
     el('button', { class: 'btn btn-primary btn-block', onClick: exportBackup }, '⬇️  Esporta backup (.json)'),
     el('div', { class: 'spacer' }),
     el('label', { class: 'btn btn-ghost btn-block', style: 'cursor:pointer;' }, [
-      '⬆️  Importa backup',
+      '⬆️  Importa backup completo',
       el('input', {
         type: 'file', accept: 'application/json,.json',
         style: 'display:none;',
         onChange: importBackup,
+      }),
+    ]),
+  ]));
+
+  // --- Import singola scheda ---
+  mount.appendChild(el('div', { class: 'section-head' }, [el('h2', { text: 'Schede singole' })]));
+  mount.appendChild(el('div', { class: 'card' }, [
+    el('p', { class: 'muted small', text: 'Importa una scheda ricevuta da qualcuno (o esportata da te). Viene aggiunta senza cancellare le tue: gli esercizi con lo stesso nome vengono uniti. Per esportare una singola scheda usa il menu ⋮ sulla scheda.' }),
+    el('div', { class: 'spacer' }),
+    el('label', { class: 'btn btn-ghost btn-block', style: 'cursor:pointer;' }, [
+      '⬆️  Importa una scheda',
+      el('input', {
+        type: 'file', accept: 'application/json,.json',
+        style: 'display:none;',
+        onChange: importSingleWorkout,
       }),
     ]),
   ]));
@@ -71,6 +86,27 @@ async function importBackup(e) {
     const json = JSON.parse(text);
     const res = await store.importData(json, { replace: true });
     toast(`Importati: ${res.workouts} schede, ${res.exercises} esercizi`);
+    router.navigate('schede');
+  } catch (err) {
+    console.error(err);
+    toast('File non valido');
+  }
+  e.target.value = '';
+}
+
+async function importSingleWorkout(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const json = JSON.parse(text);
+    if (json.kind !== 'workout') {
+      toast('Questo file è un backup completo: usa "Importa backup completo".');
+      e.target.value = '';
+      return;
+    }
+    const res = await store.importWorkout(json);
+    toast(`Scheda "${res.name}" importata`);
     router.navigate('schede');
   } catch (err) {
     console.error(err);

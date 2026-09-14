@@ -160,8 +160,12 @@ function editWorkoutMeta(w) {
 /* ---------------- Giorno ---------------- */
 function dayCard(w, day) {
   const items = day.items || [];
+  const done = store.isDayDone(day);
   const head = el('div', { style: 'display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;' }, [
-    el('h3', { style: 'margin:0; font-size:1.1rem;', text: day.name }),
+    el('h3', { class: 'day-name' + (done ? ' day-done' : ''), style: 'margin:0; font-size:1.1rem;' }, [
+      done ? el('span', { text: '✓ ' }) : null,
+      el('span', { text: day.name }),
+    ].filter(Boolean)),
     el('button', { class: 'icon-btn', 'aria-label': 'Opzioni giorno', onClick: () => dayMenu(w, day) }, '⋮'),
   ]);
 
@@ -186,7 +190,14 @@ function dayCard(w, day) {
 }
 
 function dayMenu(w, day) {
+  const done = store.isDayDone(day);
   const body = el('div', {}, [
+    mBtn(done ? '↩️  Segna da fare' : '✓  Segna come fatto', async () => {
+      day.done = !done;
+      await store.saveWorkout(w);
+      toast(done ? 'Segnato da fare' : 'Segnato come fatto');
+      rerender();
+    }),
     mBtn('✏️  Rinomina giorno', async () => {
       const name = await promptDialog('Rinomina giorno', { label: 'Nome', value: day.name });
       if (name) { day.name = name; await store.saveWorkout(w); rerender(); }
