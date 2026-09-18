@@ -12,7 +12,7 @@ export async function renderGrafici(mount) {
   ]);
 
   if (exercises.length === 0) {
-    mount.appendChild(emptyState('📈', 'Nessun dato ancora. Aggiungi esercizi e registra i pesi per vedere i grafici.'));
+    mount.appendChild(emptyState('📈', 'Ancora nessun grafico', null, 'Aggiungi esercizi alle schede e registra qualche peso: qui vedrai l\'andamento nel tempo.'));
     return;
   }
 

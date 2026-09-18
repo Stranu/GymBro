@@ -12,7 +12,7 @@ export async function renderEsercizi(mount) {
   clear(mount);
 
   if (exercises.length === 0) {
-    mount.appendChild(emptyState('🏋️', 'Il catalogo è vuoto. Gli esercizi che aggiungi alle schede compaiono qui.'));
+    mount.appendChild(emptyState('🏋️', 'Catalogo vuoto', null, 'Gli esercizi che aggiungi alle schede compaiono qui, con il loro storico pesi.'));
     return;
   }
 

@@ -19,8 +19,9 @@ export async function renderSchede(mount) {
 
   if (workouts.length === 0) {
     mount.appendChild(
-      emptyState('📋', 'Nessuna scheda ancora. Creane una per iniziare.',
-        el('button', { class: 'btn btn-primary', onClick: () => createFlow() }, '+ Nuova scheda'))
+      emptyState('📋', 'Nessuna scheda ancora',
+        el('button', { class: 'btn btn-primary', onClick: () => createFlow() }, '+ Crea la prima scheda'),
+        'Crea una scheda, aggiungi i giorni e gli esercizi, e tieni traccia dei pesi nel tempo.')
     );
     addFab();
     return;

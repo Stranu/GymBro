@@ -335,11 +335,12 @@ export function progressBadge(delta) {
   return el('span', { class: 'progress-badge ' + cls, title: 'Rispetto alla volta precedente' }, label);
 }
 
-export function emptyState(icon, text, actionNode = null) {
+export function emptyState(icon, text, actionNode = null, subtitle = null) {
   return el('div', { class: 'empty' }, [
     el('div', { class: 'empty-icon', text: icon }),
-    el('p', { text }),
-    actionNode,
+    el('p', { class: 'empty-title', text }),
+    subtitle ? el('p', { class: 'empty-sub', text: subtitle }) : null,
+    actionNode ? el('div', { class: 'empty-action' }, [actionNode]) : null,
   ].filter(Boolean));
 }
 
