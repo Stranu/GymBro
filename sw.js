@@ -5,7 +5,7 @@
  * forzare l'aggiornamento). Il cambiamento di questo file fa sì che il browser
  * scarichi la nuova versione, ripulisca la vecchia cache e attivi l'update.
  */
-const CACHE_VERSION = 'v16';
+const CACHE_VERSION = 'v16.1';
 const CACHE = 'gymbro-' + CACHE_VERSION;
 
 const ASSETS = [
