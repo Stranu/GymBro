@@ -2,10 +2,11 @@
 import * as store from '../store.js';
 import * as router from '../router.js';
 import {
-  el, clear, openModal, confirmDialog, promptDialog, toast, emptyState, tagChip, progressBadge, fmtDate, tagPickerDialog,
+  el, clear, openModal, confirmDialog, promptDialog, toast, emptyState, tagChip, progressBadge, tagPickerDialog, menuButton, tryOr,
 } from '../ui.js';
 import { openExercisePicker } from './picker.js';
 import { createToolbar, teardownTools, startTimerWith } from './tools.js';
+import { openWeightDialog } from './weight-dialog.js';
 
 // cache dei pesi più recenti, dei nomi e del progresso per exerciseId (evita query ripetute e flicker durante il render)
 let latestCache = {};
@@ -148,10 +149,9 @@ function editWorkoutMeta(w) {
       label: 'Salva', class: 'btn-primary', onClick: async (c) => {
         w.note = noteInput.value.trim();
         w.defaults = { sets: setsIn.value.trim(), reps: repsIn.value.trim(), rest: restIn.value.trim() };
-        await store.saveWorkout(w);
+        const ok = await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito');
         c();
-        toast('Salvato');
-        rerender();
+        if (ok) { toast('Salvato'); rerender(); }
       },
     },
   ]);
@@ -191,28 +191,31 @@ function dayCard(w, day) {
 
 function dayMenu(w, day) {
   const done = store.isDayDone(day);
-  const body = el('div', {}, [
-    mBtn(done ? '↩️  Segna da fare' : '✓  Segna come fatto', async () => {
+  const body = el('div', {});
+  const { close } = openModal(day.name, body);
+  body.append(
+    menuButton(done ? '↩️  Segna da fare' : '✓  Segna come fatto', close, async () => {
       day.done = !done;
-      await store.saveWorkout(w);
-      toast(done ? 'Segnato da fare' : 'Segnato come fatto');
-      rerender();
+      if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) {
+        toast(done ? 'Segnato da fare' : 'Segnato come fatto');
+        rerender();
+      }
     }),
-    mBtn('✏️  Rinomina giorno', async () => {
+    menuButton('✏️  Rinomina giorno', close, async () => {
       const name = await promptDialog('Rinomina giorno', { label: 'Nome', value: day.name });
-      if (name) { day.name = name; await store.saveWorkout(w); rerender(); }
+      if (name) { day.name = name; if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) rerender(); }
     }),
-    mBtn('🗑️  Elimina giorno', async () => {
+    menuButton('🗑️  Elimina giorno', close, async () => {
       const ok = await confirmDialog('Eliminare il giorno?', `"${day.name}" e i suoi esercizi verranno rimossi dalla scheda.`, { okLabel: 'Elimina', danger: true });
       if (ok) {
         w.days = w.days.filter((d) => d.id !== day.id);
-        await store.saveWorkout(w);
-        toast('Giorno eliminato');
-        rerender();
+        if (await tryOr(() => store.saveWorkout(w), 'Eliminazione non riuscita')) {
+          toast('Giorno eliminato');
+          rerender();
+        }
       }
     }, true),
-  ]);
-  openModal(day.name, body);
+  );
 }
 
 /* ---------------- Item (esercizio singolo o superset) ---------------- */
@@ -266,21 +269,23 @@ function dragHandle() {
  * @param {object} target  item singolo o sub-esercizio (contiene exerciseId + pushNext)
  */
 function exerciseMenu(w, day, target, exerciseId) {
-  const body = el('div', {}, [
-    mBtn('⏱️  Avvia timer recupero', () => {
+  const body = el('div', {});
+  const { close } = openModal('Opzioni', body);
+  body.append(
+    menuButton('⏱️  Avvia timer recupero', close, () => {
       const secs = parseRestSeconds(target.rest || (w.defaults || {}).rest) || 90;
       startTimerWith(secs);
       toast('Timer recupero avviato');
     }),
-    mBtn('📈  Vedi storico e grafico', () => router.navigate('esercizio/' + exerciseId)),
-    mBtn((target.pushNext ? '🔽  Togli da aumentare' : '🔼  Segna da aumentare'), async () => {
+    menuButton('📈  Vedi storico e grafico', close, () => router.navigate('esercizio/' + exerciseId)),
+    menuButton((target.pushNext ? '🔽  Togli da aumentare' : '🔼  Segna da aumentare'), close, async () => {
       target.pushNext = !target.pushNext;
-      await store.saveWorkout(w);
-      toast(target.pushNext ? 'Segnato da aumentare' : 'Rimosso');
-      rerender();
+      if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) {
+        toast(target.pushNext ? 'Segnato da aumentare' : 'Rimosso');
+        rerender();
+      }
     }),
-  ]);
-  openModal('Opzioni', body);
+  );
 }
 
 function renderSuperset(w, day, item) {
@@ -394,10 +399,10 @@ async function addExercise(w, day) {
   const ex = await store.getOrCreateExercise(picked.name, picked.tags);
   day.items = day.items || [];
   day.items.push({ id: store.uid(), type: 'single', exerciseId: ex.id, sets: '', reps: '', rest: '', note: '' });
-  await store.saveWorkout(w);
-  latestCache[ex.id] = await store.getLatestWeight(ex.id);
-  toast('Esercizio aggiunto');
-  rerender();
+  if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) {
+    toast('Esercizio aggiunto');
+    rerender(); // rerender ricostruisce le cache (latest/name/progress)
+  }
 }
 
 async function addSuperset(w, day) {
@@ -416,11 +421,10 @@ async function addSuperset(w, day) {
       { exerciseId: e2.id, reps: '', note: '' },
     ],
   });
-  await store.saveWorkout(w);
-  latestCache[e1.id] = await store.getLatestWeight(e1.id);
-  latestCache[e2.id] = await store.getLatestWeight(e2.id);
-  toast('Super serie aggiunta');
-  rerender();
+  if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) {
+    toast('Super serie aggiunta');
+    rerender();
+  }
 }
 
 async function addDay(w) {
@@ -429,8 +433,7 @@ async function addDay(w) {
   if (name === null) return;
   w.days = w.days || [];
   w.days.push({ id: store.uid(), name: name || 'G' + n, items: [] });
-  await store.saveWorkout(w);
-  rerender();
+  if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) rerender();
 }
 
 /* ---------------- Sheet dettaglio esercizio singolo ---------------- */
@@ -484,8 +487,7 @@ async function openExerciseSheet(w, day, item) {
         const ok = await confirmDialog('Rimuovere dall\'allenamento?', `"${ex.name}" verrà tolto da questo giorno. Lo storico resta nel catalogo.`, { okLabel: 'Rimuovi', danger: true });
         if (ok) {
           day.items = day.items.filter((x) => x.id !== item.id);
-          await store.saveWorkout(w);
-          rerender();
+          if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) rerender();
         }
       },
     },
@@ -500,16 +502,15 @@ async function openExerciseSheet(w, day, item) {
             return;
           }
           ex.name = newName;
-          await store.updateExercise(ex);
+          if (!await tryOr(() => store.updateExercise(ex), 'Salvataggio non riuscito')) return;
         }
         item.sets = setsIn.value.trim();
         item.reps = repsIn.value.trim();
         item.rest = restIn.value.trim();
         item.note = noteIn.value.trim();
-        await store.saveWorkout(w);
+        const ok = await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito');
         c();
-        toast('Salvato');
-        rerender();
+        if (ok) { toast('Salvato'); rerender(); }
       },
     },
   ]);
@@ -531,10 +532,9 @@ async function openSupersetSubSheet(w, day, item, sub) {
       label: 'Salva', class: 'btn-primary', onClick: async (c) => {
         sub.reps = repsIn.value.trim();
         sub.note = noteIn.value.trim();
-        await store.saveWorkout(w);
+        const ok = await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito');
         c();
-        toast('Salvato');
-        rerender();
+        if (ok) { toast('Salvato'); rerender(); }
       },
     },
   ]);
@@ -554,58 +554,20 @@ function supersetMenu(w, day, item) {
       label: 'Rimuovi', class: 'btn-ghost', onClick: async (c) => {
         c();
         const ok = await confirmDialog('Rimuovere la super serie?', 'Verrà tolta da questo giorno.', { okLabel: 'Rimuovi', danger: true });
-        if (ok) { day.items = day.items.filter((x) => x.id !== item.id); await store.saveWorkout(w); rerender(); }
+        if (ok) { day.items = day.items.filter((x) => x.id !== item.id); if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) rerender(); }
       },
     },
     {
       label: 'Salva', class: 'btn-primary', onClick: async (c) => {
         item.sets = setsIn.value.trim(); item.rest = restIn.value.trim();
-        await store.saveWorkout(w); c(); rerender();
+        const ok = await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito');
+        c(); if (ok) rerender();
       },
     },
   ]);
 }
 
 /* ---------------- Aggiornamento peso rapido ---------------- */
-async function quickWeight(w, exerciseId) {
-  const ex = await store.getExercise(exerciseId);
-  const latest = await store.getLatestWeight(exerciseId);
-  const progress = await store.getWeightProgress(exerciseId);
-  const valIn = el('input', { class: 'input', type: 'number', inputmode: 'decimal', step: '0.5', value: latest && latest.value != null ? latest.value : '', placeholder: 'es. 50' });
-  const noteIn = el('input', { class: 'input', value: latest ? (latest.note || '') : '', placeholder: 'es. per lato, elastico...' });
-  const dateIn = el('input', { class: 'input', type: 'date', value: store.todayISO() });
-
-  openModal('Peso · ' + (ex ? ex.name : ''), el('div', {}, [
-    el('div', { class: 'field' }, [el('label', { text: 'Peso (kg)' }), valIn]),
-    el('div', { class: 'field' }, [el('label', { text: 'Nota' }), noteIn]),
-    el('div', { class: 'field' }, [el('label', { text: 'Data' }), dateIn]),
-    latest ? el('p', { class: 'muted small', style: 'display:flex; align-items:center; gap:8px; flex-wrap:wrap;' }, [
-      el('span', { text: `Ultimo: ${latest.value != null ? latest.value + ' kg' : (latest.note || '-')} (${fmtDate(latest.date)})` }),
-      progress ? progressBadge(progress.delta) : null,
-    ].filter(Boolean)) : null,
-  ].filter(Boolean)), [
-    { label: 'Annulla', class: 'btn-ghost', onClick: (c) => c() },
-    {
-      label: 'Salva peso', class: 'btn-primary', onClick: async (c) => {
-        await store.logWeight(exerciseId, {
-          value: valIn.value,
-          note: noteIn.value.trim(),
-          date: dateIn.value || store.todayISO(),
-          workoutId: w.id,
-        });
-        latestCache[exerciseId] = await store.getLatestWeight(exerciseId);
-        c();
-        toast('Peso aggiornato');
-        rerender();
-      },
-    },
-  ]);
-}
-
-function mBtn(label, onClick, danger = false) {
-  return el('button', {
-    class: 'btn btn-block btn-ghost',
-    style: 'justify-content:flex-start; margin-bottom:8px;' + (danger ? 'color:var(--danger);' : ''),
-    onClick: () => { document.querySelector('.modal-backdrop')?.remove(); onClick(); },
-  }, label);
+function quickWeight(w, exerciseId) {
+  return openWeightDialog(exerciseId, { workoutId: w.id, onSaved: rerender });
 }

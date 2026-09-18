@@ -50,6 +50,53 @@ export function toast(msg, ms = 2200) {
   }, ms);
 }
 
+/**
+ * Esegue un'azione asincrona (tipicamente una scrittura su DB) e, se fallisce,
+ * mostra un toast di errore invece di lasciare che l'eccezione sparisca in
+ * silenzio lasciando la UI con dati vecchi.
+ * @param {function} action  funzione async da eseguire
+ * @param {string} errorMsg  messaggio mostrato in caso di errore
+ * @returns {Promise<boolean>} true se riuscita, false se fallita
+ */
+export async function tryOr(action, errorMsg = 'Operazione non riuscita') {
+  try {
+    await action();
+    return true;
+  } catch (err) {
+    console.error(err);
+    toast(errorMsg);
+    return false;
+  }
+}
+
+/** Scarica un oggetto come file JSON (gestisce blob + object URL + cleanup). */
+export function downloadJSON(filename, dataObj) {
+  const blob = new Blob([JSON.stringify(dataObj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = el('a', { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Pulsante a piena larghezza per righe di menu in un modale.
+ * Riceve la funzione `close` reale del modale (da openModal), così chiude in
+ * modo pulito senza cercare il backdrop nel DOM.
+ * @param {string} label
+ * @param {function} close      la close del modale corrente
+ * @param {function} onClick    azione (può essere async)
+ * @param {boolean} danger
+ */
+export function menuButton(label, close, onClick, danger = false) {
+  return el('button', {
+    class: 'btn btn-block btn-ghost',
+    style: 'justify-content:flex-start; margin-bottom:8px;' + (danger ? 'color:var(--danger);' : ''),
+    onClick: () => { close(); onClick(); },
+  }, label);
+}
+
 /* ---------------- MODAL ---------------- */
 /**
  * Apre un bottom-sheet modale.

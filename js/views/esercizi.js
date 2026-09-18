@@ -1,8 +1,9 @@
 /* GymBro - view: catalogo esercizi + dettaglio esercizio con storico/grafico */
 import * as store from '../store.js';
 import * as router from '../router.js';
-import { el, clear, emptyState, openModal, confirmDialog, promptDialog, toast, tagChip, fmtDate, tagFilter, tagPickerDialog } from '../ui.js';
+import { el, clear, emptyState, confirmDialog, promptDialog, toast, tagChip, fmtDate, tagFilter, tagPickerDialog, tryOr } from '../ui.js';
 import { lineChart } from '../chart.js';
+import { openWeightDialog } from './weight-dialog.js';
 
 /* ============ LISTA CATALOGO ============ */
 export async function renderEsercizi(mount) {
@@ -79,9 +80,10 @@ export async function renderEsercizio(mount, params) {
         const t = await tagPickerDialog(knownTags, ex.tags || [], store.normalizeTag);
         if (t) {
           ex.tags = [...new Set([...(ex.tags || []), t])];
-          await store.updateExercise(ex);
-          if (!knownTags.includes(t)) knownTags.push(t);
-          renderTags();
+          if (await tryOr(() => store.updateExercise(ex), 'Salvataggio non riuscito')) {
+            if (!knownTags.includes(t)) knownTags.push(t);
+            renderTags();
+          }
         }
       },
     }));
@@ -92,7 +94,7 @@ export async function renderEsercizio(mount, params) {
       el('p', { class: 'card-title', style: 'flex:1;', text: ex.name }),
       el('button', { class: 'icon-btn', 'aria-label': 'Rinomina', onClick: async () => {
         const name = await promptDialog('Rinomina esercizio', { label: 'Nome', value: ex.name });
-        if (name) { ex.name = name; await store.updateExercise(ex); router.handleRoute(); }
+        if (name) { ex.name = name; if (await tryOr(() => store.updateExercise(ex), 'Salvataggio non riuscito')) router.handleRoute(); }
       } }, '✏️'),
     ]),
     tagsWrap,
@@ -119,7 +121,7 @@ export async function renderEsercizio(mount, params) {
   }
 
   // Pulsante nuovo peso
-  mount.appendChild(el('button', { class: 'btn btn-primary btn-block', style: 'margin:6px 0 12px;', onClick: () => addWeight(ex) }, '+ Registra peso'));
+  mount.appendChild(el('button', { class: 'btn btn-primary btn-block', style: 'margin:6px 0 12px;', onClick: () => openWeightDialog(ex.id, { onSaved: () => router.handleRoute() }) }, '+ Registra peso'));
 
   // Storico
   mount.appendChild(el('div', { class: 'section-head' }, [el('h2', { text: 'Storico' })]));
@@ -137,7 +139,7 @@ export async function renderEsercizio(mount, params) {
           el('span', { class: 'muted small', text: fmtDate(h.date) }),
           el('button', { class: 'icon-btn', style: 'width:32px;height:32px;font-size:1rem;', 'aria-label': 'Elimina', onClick: async () => {
             const ok = await confirmDialog('Eliminare la registrazione?', `${h.value != null ? h.value + ' kg' : h.note} del ${fmtDate(h.date)}`, { okLabel: 'Elimina', danger: true });
-            if (ok) { await store.deleteWeightLog(h.id); toast('Eliminata'); router.handleRoute(); }
+            if (ok && await tryOr(() => store.deleteWeightLog(h.id), 'Eliminazione non riuscita')) { toast('Eliminata'); router.handleRoute(); }
           } }, '🗑️'),
         ]),
       ]));
@@ -148,27 +150,13 @@ export async function renderEsercizio(mount, params) {
   // Elimina esercizio
   mount.appendChild(el('div', { class: 'divider' }));
   mount.appendChild(el('button', { class: 'btn btn-ghost btn-block', style: 'color:var(--danger);', onClick: async () => {
-    const ok = await confirmDialog('Eliminare l\'esercizio?', `"${ex.name}" e tutto il suo storico verranno eliminati. Resterà eventualmente referenziato nelle schede come esercizio mancante.`, { okLabel: 'Elimina', danger: true });
-    if (ok) { await store.deleteExercise(ex.id); toast('Esercizio eliminato'); router.navigate('esercizi'); }
+    const usage = await store.countExerciseUsage(ex.id);
+    const msg = usage > 0
+      ? `"${ex.name}" e tutto il suo storico verranno eliminati. Verrà anche rimosso da ${usage} ${usage === 1 ? 'scheda' : 'schede'} in cui è presente.`
+      : `"${ex.name}" e tutto il suo storico verranno eliminati.`;
+    const ok = await confirmDialog('Eliminare l\'esercizio?', msg, { okLabel: 'Elimina', danger: true });
+    if (ok && await tryOr(() => store.deleteExercise(ex.id), 'Eliminazione non riuscita')) { toast('Esercizio eliminato'); router.navigate('esercizi'); }
   } }, '🗑️  Elimina esercizio'));
 
   mount.appendChild(el('div', { style: 'height:40px;' }));
-
-  async function addWeight(ex) {
-    const latest = history.length ? history[history.length - 1] : null;
-    const valIn = el('input', { class: 'input', type: 'number', inputmode: 'decimal', step: '0.5', placeholder: 'es. 50', value: latest && latest.value != null ? latest.value : '' });
-    const noteIn = el('input', { class: 'input', placeholder: 'es. per lato', value: latest ? (latest.note || '') : '' });
-    const dateIn = el('input', { class: 'input', type: 'date', value: store.todayISO() });
-    openModal('Registra peso · ' + ex.name, el('div', {}, [
-      el('div', { class: 'field' }, [el('label', { text: 'Peso (kg)' }), valIn]),
-      el('div', { class: 'field' }, [el('label', { text: 'Nota' }), noteIn]),
-      el('div', { class: 'field' }, [el('label', { text: 'Data' }), dateIn]),
-    ]), [
-      { label: 'Annulla', class: 'btn-ghost', onClick: (c) => c() },
-      { label: 'Salva', class: 'btn-primary', onClick: async (c) => {
-        await store.logWeight(ex.id, { value: valIn.value, note: noteIn.value.trim(), date: dateIn.value || store.todayISO() });
-        c(); toast('Peso salvato'); router.handleRoute();
-      } },
-    ]);
-  }
 }

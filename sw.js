@@ -5,7 +5,7 @@
  * forzare l'aggiornamento). Il cambiamento di questo file fa sì che il browser
  * scarichi la nuova versione, ripulisca la vecchia cache e attivi l'update.
  */
-const CACHE_VERSION = 'v15';
+const CACHE_VERSION = 'v16';
 const CACHE = 'gymbro-' + CACHE_VERSION;
 
 const ASSETS = [
@@ -22,6 +22,7 @@ const ASSETS = [
   './js/chart.js',
   './js/views/schede.js',
   './js/views/scheda.js',
+  './js/views/weight-dialog.js',
   './js/views/tools.js',
   './js/views/picker.js',
   './js/views/esercizi.js',
@@ -52,11 +53,10 @@ self.addEventListener('message', (e) => {
   if (e.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
+// Codice dell'app (HTML/JS/manifest): vogliamo sempre l'ultima versione con rete.
 function isAppCode(url) {
-  // HTML e JS: vogliamo sempre l'ultima versione quando c'è rete.
   return url.pathname.endsWith('.js') ||
          url.pathname.endsWith('.html') ||
-         url.pathname.endsWith('/') ||
          url.pathname.endsWith('.webmanifest');
 }
 
@@ -68,8 +68,11 @@ self.addEventListener('fetch', (e) => {
   // Solo richieste same-origin passano dalla nostra logica.
   if (url.origin !== self.location.origin) return;
 
-  if (isAppCode(url)) {
-    // NETWORK-FIRST: prova la rete (versione fresca), fallback alla cache offline.
+  // Le navigazioni (aprire l'app) e il codice dell'app usano network-first.
+  const isNavigation = req.mode === 'navigate';
+
+  if (isNavigation || isAppCode(url)) {
+    // NETWORK-FIRST: rete se disponibile, altrimenti cache.
     e.respondWith(
       fetch(req)
         .then((res) => {
@@ -79,20 +82,29 @@ self.addEventListener('fetch', (e) => {
           }
           return res;
         })
-        .catch(() => caches.match(req).then((cached) => cached || caches.match('./index.html')))
+        .catch(async () => {
+          const cached = await caches.match(req);
+          if (cached) return cached;
+          // solo per le navigazioni ha senso ripiegare sullo shell HTML;
+          // per un .js mancante servirlo come HTML lo romperebbe.
+          if (isNavigation) return caches.match('./index.html');
+          return Response.error();
+        })
     );
   } else {
-    // CACHE-FIRST per le risorse statiche (icone, ecc.).
+    // CACHE-FIRST per le risorse statiche (icone, ecc.), con fallback pulito.
     e.respondWith(
       caches.match(req).then((cached) => {
         if (cached) return cached;
-        return fetch(req).then((res) => {
-          if (res && res.ok) {
-            const clone = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, clone));
-          }
-          return res;
-        });
+        return fetch(req)
+          .then((res) => {
+            if (res && res.ok) {
+              const clone = res.clone();
+              caches.open(CACHE).then((c) => c.put(req, clone));
+            }
+            return res;
+          })
+          .catch(() => Response.error());
       })
     );
   }

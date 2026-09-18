@@ -1,7 +1,7 @@
 /* GymBro - view: lista schede */
 import * as store from '../store.js';
 import * as router from '../router.js';
-import { el, clear, emptyState, openModal, confirmDialog, toast, fmtDate } from '../ui.js';
+import { el, clear, emptyState, openModal, confirmDialog, promptDialog, toast, fmtDate, menuButton, tryOr, downloadJSON } from '../ui.js';
 
 export async function renderSchede(mount) {
   window.setViewTitle('Le mie schede');
@@ -98,64 +98,46 @@ function workoutCard(w, isArchived = false) {
 }
 
 function openWorkoutMenu(w, isArchived) {
-  const body = el('div', {}, [
-    menuBtn('✏️  Rinomina', async (close) => {
-      close();
-      const { promptDialog } = await import('../ui.js');
+  const body = el('div', {});
+  const { close } = openModal(w.name, body);
+  body.append(
+    menuButton('✏️  Rinomina', close, async () => {
       const name = await promptDialog('Rinomina scheda', { label: 'Nome', value: w.name });
-      if (name) { w.name = name; await store.saveWorkout(w); toast('Rinominata'); router.handleRoute(); }
+      if (name) { w.name = name; if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) { toast('Rinominata'); router.handleRoute(); } }
     }),
-    menuBtn('📑  Duplica', async (close) => {
-      close();
-      await store.duplicateWorkout(w.id);
-      toast('Scheda duplicata');
-      router.handleRoute();
+    menuButton('📑  Duplica', close, async () => {
+      if (await tryOr(() => store.duplicateWorkout(w.id), 'Operazione non riuscita')) {
+        toast('Scheda duplicata');
+        router.handleRoute();
+      }
     }),
-    menuBtn('📤  Esporta scheda', async (close) => {
-      close();
-      await exportSingleWorkout(w);
-    }),
-    menuBtn(isArchived ? '📤  Ripristina' : '📥  Archivia', async (close) => {
-      close();
+    menuButton('📤  Esporta scheda', close, () => exportSingleWorkout(w)),
+    menuButton(isArchived ? '📤  Ripristina' : '📥  Archivia', close, async () => {
       w.archived = !isArchived;
-      await store.saveWorkout(w);
-      toast(isArchived ? 'Ripristinata' : 'Archiviata');
-      router.handleRoute();
+      if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) {
+        toast(isArchived ? 'Ripristinata' : 'Archiviata');
+        router.handleRoute();
+      }
     }),
-    menuBtn('🗑️  Elimina', async (close) => {
-      close();
+    menuButton('🗑️  Elimina', close, async () => {
       const ok = await confirmDialog('Eliminare la scheda?',
         `"${w.name}" verrà eliminata. Lo storico dei pesi degli esercizi resta nel catalogo.`,
         { okLabel: 'Elimina', danger: true });
-      if (ok) { await store.deleteWorkout(w.id); toast('Eliminata'); router.handleRoute(); }
+      if (ok && await tryOr(() => store.deleteWorkout(w.id), 'Eliminazione non riuscita')) { toast('Eliminata'); router.handleRoute(); }
     }, true),
-  ]);
-  openModal(w.name, body);
-}
-
-function menuBtn(label, onClick, danger = false) {
-  return el('button', {
-    class: 'btn btn-block ' + (danger ? 'btn-ghost' : 'btn-ghost'),
-    style: 'justify-content:flex-start; margin-bottom:8px;' + (danger ? 'color:var(--danger);' : ''),
-    onClick: () => onClick(() => document.querySelector('.modal-backdrop')?.remove()),
-  }, label);
+  );
 }
 
 async function exportSingleWorkout(w) {
-  const data = await store.exportWorkout(w.id);
-  const safe = (w.name || 'scheda').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = el('a', { href: url, download: `gymbro-scheda-${safe}.json` });
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  toast('Scheda esportata');
+  const okExport = await tryOr(async () => {
+    const data = await store.exportWorkout(w.id);
+    const safe = (w.name || 'scheda').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+    downloadJSON(`gymbro-scheda-${safe}.json`, data);
+  }, 'Esportazione non riuscita');
+  if (okExport) toast('Scheda esportata');
 }
 
 async function createFlow() {
-  const { promptDialog } = await import('../ui.js');
   const suggested = 'Scheda ' + new Date().toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
   const name = await promptDialog('Nuova scheda', {
     label: 'Nome scheda',

@@ -108,3 +108,49 @@ export async function clearAll() {
   await clearStore('weightLog');
   await clearStore('meta');
 }
+
+/**
+ * Esegue operazioni su più store in UNA SOLA transazione (atomica).
+ * Se qualcosa fallisce, IndexedDB annulla l'intera transazione: nessuno stato
+ * parziale. `fn` riceve un oggetto { <storeName>: objectStore } su cui operare
+ * in modo sincrono (put/delete/clear); NON usare await dentro fn tra due
+ * operazioni sullo stesso tx, altrimenti la transazione si chiude.
+ * @param {string[]} stores
+ * @param {'readonly'|'readwrite'} mode
+ * @param {function} fn  (stores) => void
+ */
+export async function runTx(storeNames, mode, fn) {
+  const db = await openDB();
+  const t = db.transaction(storeNames, mode);
+  const stores = {};
+  storeNames.forEach((n) => { stores[n] = t.objectStore(n); });
+  return new Promise((resolve, reject) => {
+    let result;
+    try {
+      result = fn(stores);
+    } catch (e) {
+      try { t.abort(); } catch (_) { /* già in errore */ }
+      reject(e);
+      return;
+    }
+    t.oncomplete = () => resolve(result);
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error || new Error('Transazione annullata'));
+  });
+}
+
+/**
+ * Sostituisce atomicamente il contenuto di uno o più store: svuota e riscrive
+ * tutto in una singola transazione. Se fallisce, i dati esistenti restano
+ * intatti (rollback automatico).
+ * @param {Object.<string, Array>} dataByStore  es. { exercises: [...], workouts: [...] }
+ */
+export async function replaceStores(dataByStore) {
+  const names = Object.keys(dataByStore);
+  return runTx(names, 'readwrite', (stores) => {
+    for (const name of names) {
+      stores[name].clear();
+      for (const value of dataByStore[name]) stores[name].put(value);
+    }
+  });
+}

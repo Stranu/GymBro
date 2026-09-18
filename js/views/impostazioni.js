@@ -1,7 +1,7 @@
 /* GymBro - view: impostazioni / backup / info */
 import * as store from '../store.js';
 import * as router from '../router.js';
-import { el, clear, toast, confirmDialog, fmtDate } from '../ui.js';
+import { el, clear, toast, confirmDialog, fmtDate, downloadJSON, tryOr } from '../ui.js';
 
 export async function renderImpostazioni(mount) {
   window.setViewTitle('Altro');
@@ -59,19 +59,12 @@ export async function renderImpostazioni(mount) {
 }
 
 async function exportBackup() {
-  const data = await store.exportData();
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = el('a', {
-    href: url,
-    download: `gymbro-backup-${store.todayISO()}.json`,
-  });
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  await store.markBackupDone();
-  toast('Backup esportato');
+  const ok = await tryOr(async () => {
+    const data = await store.exportData();
+    downloadJSON(`gymbro-backup-${store.todayISO()}.json`, data);
+    await store.markBackupDone();
+  }, 'Esportazione non riuscita');
+  if (ok) toast('Backup esportato');
 }
 
 async function importBackup(e) {

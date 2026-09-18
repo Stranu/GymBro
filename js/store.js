@@ -129,10 +129,49 @@ export async function updateExercise(ex) {
   return ex;
 }
 
+/** Rimuove ogni riferimento a un exerciseId dagli item di una scheda (single + superset). Ritorna true se ha modificato qualcosa. */
+function stripExerciseFromWorkout(w, exerciseId) {
+  let changed = false;
+  (w.days || []).forEach((d) => {
+    const before = (d.items || []).length;
+    d.items = (d.items || []).filter((it) => {
+      if (it.type === 'superset') {
+        const kept = (it.exercises || []).filter((s) => s.exerciseId !== exerciseId);
+        if (kept.length !== (it.exercises || []).length) changed = true;
+        it.exercises = kept;
+        // una superset con meno di 2 esercizi non ha più senso: rimuovila
+        return kept.length >= 2;
+      }
+      return it.exerciseId !== exerciseId;
+    });
+    if ((d.items || []).length !== before) changed = true;
+  });
+  return changed;
+}
+
+/** Conta in quante schede (attive/archiviate) un esercizio è usato. */
+export async function countExerciseUsage(id) {
+  const workouts = await db.getAll('workouts');
+  let count = 0;
+  for (const w of workouts) {
+    if (exerciseIdsInWorkout(w).includes(id)) count++;
+  }
+  return count;
+}
+
 export async function deleteExercise(id) {
-  // rimuove esercizio + relativo storico pesi
-  const logs = await db.getByIndex('weightLog', 'exerciseId', id);
+  // rimuove esercizio + relativo storico pesi + ogni riferimento nelle schede
+  const [logs, workouts] = await Promise.all([
+    db.getByIndex('weightLog', 'exerciseId', id),
+    db.getAll('workouts'),
+  ]);
   for (const l of logs) await db.del('weightLog', l.id);
+  for (const w of workouts) {
+    if (stripExerciseFromWorkout(w, id)) {
+      w.updatedAt = new Date().toISOString();
+      await db.put('workouts', w);
+    }
+  }
   await db.del('exercises', id);
 }
 
@@ -219,13 +258,17 @@ export async function importData(json, { replace = true } = {}) {
   if (!json || !json.data) throw new Error('File di backup non valido');
   const { workouts = [], exercises = [], weightLog = [] } = json.data;
   if (replace) {
-    await db.clearStore('workouts');
-    await db.clearStore('exercises');
-    await db.clearStore('weightLog');
+    // sostituzione atomica: clear + riscrittura in un'unica transazione.
+    // Se fallisce, i dati esistenti restano intatti (niente DB dimezzato).
+    await db.replaceStores({ exercises, weightLog, workouts });
+  } else {
+    // merge non distruttivo, comunque atomico
+    await db.runTx(['exercises', 'weightLog', 'workouts'], 'readwrite', (s) => {
+      exercises.forEach((v) => s.exercises.put(v));
+      weightLog.forEach((v) => s.weightLog.put(v));
+      workouts.forEach((v) => s.workouts.put(v));
+    });
   }
-  await db.putMany('exercises', exercises);
-  await db.putMany('weightLog', weightLog);
-  await db.putMany('workouts', workouts);
   return { workouts: workouts.length, exercises: exercises.length, weightLog: weightLog.length };
 }
 
@@ -276,30 +319,31 @@ export async function importWorkout(json) {
   const existing = await db.getAll('exercises');
   const byName = new Map(existing.map((e) => [e.name.toLowerCase(), e]));
 
-  // mappa vecchioExerciseId -> nuovoExerciseId (dopo dedup/creazione)
-  const idMap = {};
+  // Fase 1 (in memoria): calcola cosa scrivere, senza toccare il DB finché non
+  // è tutto pronto. Poi la fase 2 scrive tutto in un'unica transazione atomica.
+  const idMap = {};              // vecchioExerciseId -> nuovoExerciseId
+  const exercisesToPut = [];     // nuovi esercizi + esistenti con tag aggiornati
+  const logsToPut = [];          // storico dei soli esercizi nuovi (id rigenerati)
+  let newCount = 0;
+
   for (const src of exercises) {
     const found = byName.get(src.name.toLowerCase());
     if (found) {
-      // esercizio già presente: unisci eventuali nuovi tag, mantieni il suo storico
       const mergedTags = [...new Set([...(found.tags || []), ...(src.tags || [])])];
       if (mergedTags.length !== (found.tags || []).length) {
-        found.tags = mergedTags;
-        await db.put('exercises', found);
+        exercisesToPut.push({ ...found, tags: mergedTags });
       }
       idMap[src.id] = found.id;
     } else {
-      // nuovo esercizio: crea con id nuovo e importa il suo storico
       const newId = uid();
       idMap[src.id] = newId;
+      newCount++;
       const ex = { id: newId, name: src.name, nameLower: src.name.toLowerCase(), tags: src.tags || [], createdAt: new Date().toISOString() };
-      await db.put('exercises', ex);
+      exercisesToPut.push(ex);
       byName.set(ex.nameLower, ex);
-      // importa lo storico solo per i nuovi esercizi
-      const logs = weightLog.filter((l) => l.exerciseId === src.id);
-      for (const l of logs) {
-        await db.put('weightLog', { ...l, id: uid(), exerciseId: newId });
-      }
+      weightLog.filter((l) => l.exerciseId === src.id).forEach((l) => {
+        logsToPut.push({ ...l, id: uid(), exerciseId: newId });
+      });
     }
   }
 
@@ -327,8 +371,15 @@ export async function importWorkout(json) {
       }),
     })),
   };
-  await db.put('workouts', nw);
-  return { name: nw.name, newExercises: Object.values(idMap).length };
+
+  // Fase 2: scrittura atomica. Un errore annulla tutto, niente import parziale.
+  await db.runTx(['exercises', 'weightLog', 'workouts'], 'readwrite', (s) => {
+    exercisesToPut.forEach((e) => s.exercises.put(e));
+    logsToPut.forEach((l) => s.weightLog.put(l));
+    s.workouts.put(nw);
+  });
+
+  return { name: nw.name, newExercises: newCount };
 }
 
 /* ---------------- META (stato app) ---------------- */
