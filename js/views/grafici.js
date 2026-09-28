@@ -20,8 +20,8 @@ export async function renderGrafici(mount) {
   const histMap = {};
   for (const ex of exercises) histMap[ex.id] = await store.getWeightHistory(ex.id);
 
-  // Selettore modalità: scheda corrente vs universale
-  const state = { mode: 'universale', workoutId: null, selected: [] };
+  // Selettore modalità: scheda corrente vs universale + raggruppamento grafici
+  const state = { mode: 'universale', workoutId: null, selected: [], group: 'tag' }; // group: 'tag' | 'esercizio'
   const activeWorkouts = workouts.filter((w) => !w.archived);
   if (activeWorkouts.length) { state.workoutId = activeWorkouts[0].id; }
 
@@ -48,9 +48,17 @@ export async function renderGrafici(mount) {
         controls.appendChild(el('div', { class: 'field' }, [el('label', { text: 'Scheda' }), sel]));
       }
     }
+
+    // raggruppamento: per tag (linee affiancate) vs per esercizio (un grafico ciascuno)
+    const groupToggle = el('div', { style: 'display:flex; gap:8px; margin-bottom:12px;' }, [
+      el('button', { class: 'btn btn-sm ' + (state.group === 'tag' ? 'btn-primary' : 'btn-ghost'), style: 'flex:1;', onClick: () => { state.group = 'tag'; renderControls(); renderBody(); } }, 'Per tag'),
+      el('button', { class: 'btn btn-sm ' + (state.group === 'esercizio' ? 'btn-primary' : 'btn-ghost'), style: 'flex:1;', onClick: () => { state.group = 'esercizio'; renderControls(); renderBody(); } }, 'Per esercizio'),
+    ]);
+    controls.appendChild(groupToggle);
   }
 
   function drawExerciseCharts(exList, container) {
+    if (state.group === 'esercizio') { drawPerExercise(exList, container); return; }
     // un grafico per tag: linee affiancate degli esercizi con quel tag
     const tagSet = new Set();
     exList.forEach((ex) => (ex.tags || []).forEach((t) => tagSet.add(t)));
@@ -92,9 +100,28 @@ export async function renderGrafici(mount) {
     });
   }
 
+  function drawPerExercise(exList, container) {
+    // un grafico separato per ogni esercizio (rispettando il filtro tag)
+    let list = exList;
+    if (state.selected.length) {
+      // in modalità "per esercizio" il filtro tag = esercizi con almeno uno dei tag scelti
+      list = list.filter((ex) => (ex.tags || []).some((t) => state.selected.includes(t)));
+    }
+    // solo esercizi con almeno un peso numerico registrato
+    list = list.filter((ex) => (histMap[ex.id] || []).some((h) => h.value != null));
+    list = [...list].sort((a, b) => a.name.localeCompare(b.name, 'it'));
+
+    if (list.length === 0) {
+      container.appendChild(el('p', { class: 'muted small', style: 'text-align:center; padding:20px;', text: 'Nessun esercizio con pesi registrati.' }));
+      return;
+    }
+    list.forEach((ex) => container.appendChild(singleChart(ex)));
+  }
+
   function singleChart(ex) {
     const series = [{ label: ex.name, color: '#38bdf8', points: (histMap[ex.id] || []).filter((h) => h.value != null).map((h) => ({ x: h.date, y: h.value })) }];
-    const wrap = el('div', { class: 'chart-wrap' }, [el('h3', { text: ex.name })]);
+    const sub = (ex.tags || []).length ? '  ·  ' + ex.tags.map((t) => '#' + t).join(' ') : '';
+    const wrap = el('div', { class: 'chart-wrap' }, [el('h3', { text: ex.name + sub })]);
     const canvas = el('canvas', { height: '200' });
     wrap.appendChild(canvas);
     requestAnimationFrame(() => lineChart(canvas, series));
@@ -108,14 +135,24 @@ export async function renderGrafici(mount) {
     ])));
   }
 
+  function tagFilterOpts() {
+    if (state.group === 'esercizio') {
+      return {
+        label: 'Filtra per tag',
+        hint: 'Seleziona i tag per vedere solo gli esercizi che li hanno. Se non selezioni nulla vedi tutti gli esercizi.',
+      };
+    }
+    return {
+      label: 'Mostra gruppi',
+      hint: 'Seleziona i gruppi muscolari da mostrare. Se non selezioni nulla vedi tutti i grafici.',
+    };
+  }
+
   function renderBody() {
     clear(body);
     if (state.mode === 'universale') {
       body.appendChild(el('p', { class: 'muted small', text: 'Tutto lo storico, tra tutte le schede.' }));
-      if (tags.length) body.appendChild(tagFilter(tags, state.selected, renderBody, {
-        label: 'Mostra gruppi',
-        hint: 'Seleziona i gruppi muscolari da mostrare. Se non selezioni nulla vedi tutti i grafici.',
-      }));
+      if (tags.length) body.appendChild(tagFilter(tags, state.selected, renderBody, tagFilterOpts()));
       drawExerciseCharts(exercises, body);
     } else {
       const w = workouts.find((x) => x.id === state.workoutId);
@@ -140,10 +177,7 @@ export async function renderGrafici(mount) {
         body.appendChild(card);
       }
 
-      if (countTags.length) body.appendChild(tagFilter(countTags, state.selected, renderBody, {
-        label: 'Mostra gruppi',
-        hint: 'Seleziona i gruppi muscolari da mostrare. Se non selezioni nulla vedi tutti i grafici.',
-      }));
+      if (countTags.length) body.appendChild(tagFilter(countTags, state.selected, renderBody, tagFilterOpts()));
       drawExerciseCharts(exList, body);
     }
   }
