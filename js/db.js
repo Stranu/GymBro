@@ -1,7 +1,7 @@
 /* GymBro - IndexedDB low-level wrapper */
 
 const DB_NAME = 'gymbro';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 /**
  * Object stores:
@@ -9,9 +9,34 @@ const DB_VERSION = 1;
  *  - exercises: catalogo globale { id, name, nameLower, tags[], createdAt }
  *  - weightLog: storico pesi { id, exerciseId, date(ISO), value(number|null), note, workoutId }
  *  - meta:      chiave/valore per stato app { key, value }
+ *  - tombstones: cancellazioni per la sync { tid, store, id, deletedAt }
  */
 
 let _dbPromise = null;
+
+/** Store che partecipano alla sincronizzazione remota (meta/tombstones esclusi). */
+const SYNCED = new Set(['workouts', 'exercises', 'weightLog']);
+
+let _onChange = null;
+
+/**
+ * Registra un singolo callback invocato dopo ogni scrittura su uno store
+ * sincronizzato. È un hook di registrazione: db.js NON importa sync.js (evita
+ * cicli di import). Il callback riceve il nome dello store modificato.
+ */
+export function onChange(cb) {
+  _onChange = cb;
+}
+
+function emitChange(store) {
+  if (_onChange && SYNCED.has(store)) {
+    try {
+      _onChange(store);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+}
 
 export function openDB() {
   if (_dbPromise) return _dbPromise;
@@ -35,6 +60,9 @@ export function openDB() {
       }
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta', { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains('tombstones')) {
+        db.createObjectStore('tombstones', { keyPath: 'tid' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -70,6 +98,7 @@ export async function put(store, value) {
   const t = tx(db, store, 'readwrite');
   const r = t.objectStore(store).put(value);
   await reqToPromise(r);
+  emitChange(store);
   return value;
 }
 
@@ -79,12 +108,42 @@ export async function putMany(store, values) {
   const os = t.objectStore(store);
   values.forEach((v) => os.put(v));
   return new Promise((resolve, reject) => {
-    t.oncomplete = () => resolve(values);
+    t.oncomplete = () => { emitChange(store); resolve(values); };
     t.onerror = () => reject(t.error);
   });
 }
 
 export async function del(store, key) {
+  const db = await openDB();
+  if (SYNCED.has(store)) {
+    // cancellazione utente: elimina il record e registra la tombstone nella
+    // stessa transazione, così la sync può propagare la cancellazione.
+    const t = tx(db, [store, 'tombstones'], 'readwrite');
+    t.objectStore(store).delete(key);
+    t.objectStore('tombstones').put({
+      tid: store + ':' + key,
+      store,
+      id: key,
+      deletedAt: new Date().toISOString(),
+    });
+    await new Promise((resolve, reject) => {
+      t.oncomplete = () => resolve();
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error('Transazione annullata'));
+    });
+  } else {
+    const t = tx(db, store, 'readwrite');
+    await reqToPromise(t.objectStore(store).delete(key));
+  }
+  emitChange(store);
+}
+
+/**
+ * Cancellazione LOCALE senza tombstone e senza emitChange: usata dal percorso
+ * di pull (sync) per applicare una cancellazione proveniente dal remoto senza
+ * rimandarla indietro nel push (niente loop).
+ */
+export async function delLocal(store, key) {
   const db = await openDB();
   const t = tx(db, store, 'readwrite');
   await reqToPromise(t.objectStore(store).delete(key));
@@ -133,7 +192,10 @@ export async function runTx(storeNames, mode, fn) {
       reject(e);
       return;
     }
-    t.oncomplete = () => resolve(result);
+    t.oncomplete = () => {
+      storeNames.forEach((n) => { if (SYNCED.has(n)) emitChange(n); });
+      resolve(result);
+    };
     t.onerror = () => reject(t.error);
     t.onabort = () => reject(t.error || new Error('Transazione annullata'));
   });

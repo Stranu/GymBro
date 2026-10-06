@@ -107,6 +107,7 @@ export async function getOrCreateExercise(name, tags = []) {
     const merged = [...new Set([...(ex.tags || []), ...normTags])];
     if (merged.length !== (ex.tags || []).length) {
       ex.tags = merged;
+      ex.updatedAt = new Date().toISOString();
       await db.put('exercises', ex);
     }
     return ex;
@@ -117,6 +118,7 @@ export async function getOrCreateExercise(name, tags = []) {
     nameLower: clean.toLowerCase(),
     tags: normTags,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
   await db.put('exercises', ex);
   return ex;
@@ -125,6 +127,7 @@ export async function getOrCreateExercise(name, tags = []) {
 export async function updateExercise(ex) {
   ex.nameLower = ex.name.toLowerCase();
   ex.tags = [...new Set((ex.tags || []).map(normalizeTag).filter(Boolean))];
+  ex.updatedAt = new Date().toISOString();
   await db.put('exercises', ex);
   return ex;
 }
@@ -219,6 +222,7 @@ export async function logWeight(exerciseId, { value, note = '', date = todayISO(
     sameDay.value = Number.isNaN(numeric) ? null : numeric;
     sameDay.note = note;
     sameDay.workoutId = workoutId;
+    sameDay.updatedAt = new Date().toISOString();
     await db.put('weightLog', sameDay);
     return sameDay;
   }
@@ -229,6 +233,7 @@ export async function logWeight(exerciseId, { value, note = '', date = todayISO(
     value: Number.isNaN(numeric) ? null : numeric,
     note,
     workoutId,
+    updatedAt: new Date().toISOString(),
   };
   await db.put('weightLog', entry);
   return entry;
@@ -257,6 +262,11 @@ export async function exportData() {
 export async function importData(json, { replace = true } = {}) {
   if (!json || !json.data) throw new Error('File di backup non valido');
   const { workouts = [], exercises = [], weightLog = [] } = json.data;
+  // stampa updatedAt solo dove manca: non sovrascrivere un valore già presente
+  // (potenzialmente più recente) sui record in arrivo.
+  const nowStamp = new Date().toISOString();
+  exercises.forEach((e) => { if (!e.updatedAt) e.updatedAt = nowStamp; });
+  weightLog.forEach((l) => { if (!l.updatedAt) l.updatedAt = nowStamp; });
   if (replace) {
     // sostituzione atomica: clear + riscrittura in un'unica transazione.
     // Se fallisce, i dati esistenti restano intatti (niente DB dimezzato).
@@ -331,18 +341,18 @@ export async function importWorkout(json) {
     if (found) {
       const mergedTags = [...new Set([...(found.tags || []), ...(src.tags || [])])];
       if (mergedTags.length !== (found.tags || []).length) {
-        exercisesToPut.push({ ...found, tags: mergedTags });
+        exercisesToPut.push({ ...found, tags: mergedTags, updatedAt: new Date().toISOString() });
       }
       idMap[src.id] = found.id;
     } else {
       const newId = uid();
       idMap[src.id] = newId;
       newCount++;
-      const ex = { id: newId, name: src.name, nameLower: src.name.toLowerCase(), tags: src.tags || [], createdAt: new Date().toISOString() };
+      const ex = { id: newId, name: src.name, nameLower: src.name.toLowerCase(), tags: src.tags || [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       exercisesToPut.push(ex);
       byName.set(ex.nameLower, ex);
       weightLog.filter((l) => l.exerciseId === src.id).forEach((l) => {
-        logsToPut.push({ ...l, id: uid(), exerciseId: newId });
+        logsToPut.push({ ...l, id: uid(), exerciseId: newId, updatedAt: l.updatedAt || new Date().toISOString() });
       });
     }
   }
