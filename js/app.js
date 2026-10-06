@@ -1,5 +1,7 @@
 /* GymBro - entry point */
 import * as router from './router.js';
+import * as sync from './sync.js';
+import { getSession, onAuthStateChange } from './supabase.js';
 import { toast } from './ui.js';
 import { renderSchede } from './views/schede.js';
 import { renderScheda } from './views/scheda.js';
@@ -70,6 +72,15 @@ window.setViewTitle = (t) => { viewTitle.textContent = t; };
 
 // Avvia router
 router.startRouter();
+
+// Avvia la sincronizzazione (fire-and-forget: NON deve ritardare il boot).
+// start() registra solo il hook db.onChange ed è un no-op senza sessione.
+sync.start();
+// Se c'è già una sessione, allinea subito i dati col cloud.
+getSession().then((s) => { if (s) sync.fullSync(); });
+// Ad ogni nuovo login allinea i dati; al logout non si fa nulla lato rete
+// (i dati locali restano, la sync diventa un no-op senza sessione).
+onAuthStateChange((event) => { if (event === 'SIGNED_IN') sync.fullSync(); });
 
 // Registra service worker (solo se servito via http/https, non file://)
 // e gestisce l'auto-aggiornamento quando pubblichi una nuova versione.

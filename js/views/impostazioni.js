@@ -1,7 +1,10 @@
 /* GymBro - view: impostazioni / backup / info */
 import * as store from '../store.js';
 import * as router from '../router.js';
+import * as sync from '../sync.js';
 import { el, clear, toast, confirmDialog, fmtDate, downloadJSON, tryOr } from '../ui.js';
+import { getSession, getUser, signOut, onAuthStateChange } from '../supabase.js';
+import { openAuthModal } from './auth.js';
 
 export async function renderImpostazioni(mount) {
   window.setViewTitle('Altro');
@@ -49,6 +52,12 @@ export async function renderImpostazioni(mount) {
     el('button', { class: 'btn btn-ghost btn-block', onClick: () => window.triggerInstall && window.triggerInstall() }, '📲  Aggiungi a schermata Home'),
   ]));
 
+  // --- Account e sincronizzazione ---
+  mount.appendChild(el('div', { class: 'section-head' }, [el('h2', { text: 'Account e sincronizzazione' })]));
+  const accountCard = el('div', { class: 'card' });
+  mount.appendChild(accountCard);
+  await setupAccountSection(accountCard);
+
   // --- Dati / reset ---
   mount.appendChild(el('div', { class: 'section-head' }, [el('h2', { text: 'Zona pericolosa' })]));
   mount.appendChild(el('div', { class: 'card' }, [
@@ -56,6 +65,87 @@ export async function renderImpostazioni(mount) {
   ]));
 
   mount.appendChild(el('p', { class: 'muted small', style: 'text-align:center; margin-top:24px;', text: 'GymBro · progetto personale · dati locali' }));
+}
+
+/**
+ * Popola la card "Account e sincronizzazione" e la mantiene aggiornata.
+ * Si sottoscrive a sync.onStatus e onAuthStateChange per ri-renderizzare SOLO
+ * questa card (le altre sezioni restano intatte). Le sottoscrizioni si
+ * disiscrivono da sole quando la card non è più nel DOM (cambio vista).
+ */
+async function setupAccountSection(card) {
+  const render = async () => {
+    if (!card.isConnected) return;
+    clear(card);
+    const session = await getSession();
+    if (!card.isConnected) return;
+    if (session) {
+      await renderAccountLoggedIn(card);
+    } else {
+      renderAccountLoggedOut(card);
+    }
+  };
+
+  // Sottoscrizioni con auto-cleanup quando la card lascia il DOM.
+  let unsubStatus = null;
+  let authSub = null;
+  const cleanup = () => {
+    if (unsubStatus) { unsubStatus(); unsubStatus = null; }
+    if (authSub) { authSub.unsubscribe(); authSub = null; }
+  };
+  const onUpdate = () => {
+    if (!card.isConnected) { cleanup(); return; }
+    render();
+  };
+
+  unsubStatus = sync.onStatus(onUpdate);
+  const authRes = onAuthStateChange(() => onUpdate());
+  authSub = authRes && authRes.data ? authRes.data.subscription : null;
+
+  await render();
+}
+
+/** Stato NON loggato: spiegazione + pulsante Accedi / Registrati. */
+function renderAccountLoggedOut(card) {
+  card.appendChild(el('p', { class: 'muted small', text: 'I dati restano salvati su questo dispositivo. Accedi per salvarli anche sul cloud (backup automatico) e usarli su più dispositivi. L\'app funziona comunque senza account e offline.' }));
+  card.appendChild(el('div', { class: 'spacer' }));
+  card.appendChild(el('button', {
+    class: 'btn btn-primary btn-block',
+    onClick: () => openAuthModal(),
+  }, '🔐  Accedi / Registrati'));
+}
+
+/** Stato loggato: email, stato sync, "Sincronizza ora" ed "Esci". */
+async function renderAccountLoggedIn(card) {
+  const user = await getUser();
+  if (!card.isConnected) return;
+  const email = (user && user.email) || 'Account';
+  const status = sync.getStatus();
+
+  card.appendChild(el('p', { class: 'small', text: 'Connesso come ' + email }));
+
+  const statusText = status.syncing
+    ? 'Sincronizzazione…'
+    : (status.lastSync
+        ? 'Ultima sincronizzazione: ' + new Date(status.lastSync).toLocaleString('it-IT')
+        : 'Non ancora sincronizzato.');
+  card.appendChild(el('p', { class: 'muted small', style: 'margin:6px 0 0;', text: statusText }));
+
+  card.appendChild(el('div', { class: 'spacer' }));
+  card.appendChild(el('button', {
+    class: 'btn btn-primary btn-block',
+    disabled: status.syncing ? '' : null,
+    onClick: () => sync.fullSync(),
+  }, '🔄  Sincronizza ora'));
+
+  card.appendChild(el('div', { class: 'spacer' }));
+  card.appendChild(el('button', {
+    class: 'btn btn-ghost btn-block',
+    onClick: async () => {
+      await signOut();
+      toast('Disconnesso');
+    },
+  }, '🚪  Esci'));
 }
 
 async function exportBackup() {
