@@ -31,6 +31,30 @@ const SYNCED = ['workouts', 'exercises', 'weightLog'];
 
 const EPOCH = '1970-01-01T00:00:00.000Z';
 
+/* ---------------- Confronto timestamp per istante ---------------- */
+// I valori locali (updatedAt/deletedAt) sono prodotti da new Date().toISOString()
+// e finiscono in 'Z' con precisione ai millisecondi; Supabase restituisce i
+// timestamptz come '...+00:00' con microsecondi. Questi due formati NON si
+// ordinano correttamente in modo lessicale, quindi ogni confronto/ordinamento
+// per istante passa da Date.parse() invece che da '>' tra stringhe.
+
+/** Parsa un timestamp ISO in millisecondi; valori non validi -> 0 (epoch). */
+function tsMillis(iso) {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/** true se a è un istante strettamente successivo a b. */
+function tsGt(a, b) {
+  return tsMillis(a) > tsMillis(b);
+}
+
+/** Normalizza un timestamp ISO a forma 'Z' (millisecondi), per confronti stabili. */
+function tsNormalize(iso) {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? iso : new Date(t).toISOString();
+}
+
 /** Mappa inversa (remoto -> locale) calcolata una volta per store. */
 const INVERSE_MAP = Object.fromEntries(
   Object.entries(FIELD_MAP).map(([name, m]) => [
@@ -135,7 +159,7 @@ export async function push() {
     try {
       const since = await getPushed(name);
       const localRows = await db.getAll(name);
-      const changed = localRows.filter((r) => (r.updatedAt || EPOCH) > since);
+      const changed = localRows.filter((r) => tsGt(r.updatedAt || EPOCH, since));
 
       // tombstones di questo store -> righe soft-deleted
       const allTombstones = await db.getAll('tombstones');
@@ -160,7 +184,7 @@ export async function push() {
       // avanza il cursore al max updatedAt effettivamente inviato
       let maxUpdated = since;
       for (const r of changed) {
-        if ((r.updatedAt || EPOCH) > maxUpdated) maxUpdated = r.updatedAt;
+        if (tsGt(r.updatedAt || EPOCH, maxUpdated)) maxUpdated = r.updatedAt;
       }
       if (maxUpdated !== since) await setPushed(name, maxUpdated);
 
@@ -200,7 +224,7 @@ export async function pull() {
 
       let maxUpdated = since;
       for (const remote of data) {
-        if ((remote.updated_at || EPOCH) > maxUpdated) maxUpdated = remote.updated_at;
+        if (tsGt(remote.updated_at || EPOCH, maxUpdated)) maxUpdated = remote.updated_at;
 
         if (remote.deleted === true) {
           // cancellazione remota -> hard-delete locale senza loop
@@ -209,9 +233,12 @@ export async function pull() {
         }
 
         const mapped = mapFromRemote(name, remote);
+        // normalizza updatedAt a forma 'Z' così i confronti successivi col
+        // locale (prodotto da toISOString) e il cursore push restano coerenti.
+        if (mapped.updatedAt) mapped.updatedAt = tsNormalize(mapped.updatedAt);
         const local = await db.get(name, remote.id);
         // last-write-wins: scrivi solo se manca in locale o il remoto è più nuovo
-        if (!local || (mapped.updatedAt || EPOCH) > (local.updatedAt || EPOCH)) {
+        if (!local || tsGt(mapped.updatedAt || EPOCH, local.updatedAt || EPOCH)) {
           await db.put(name, mapped);
         }
       }
