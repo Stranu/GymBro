@@ -1,0 +1,13 @@
+# Artefatti di lavoro degli agenti / workflow (piani, task, review generati)
+.agents/
+semantic-review/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Log e temporanei
+*.log
+*.tmp
