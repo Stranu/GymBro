@@ -2,19 +2,32 @@
 import * as store from '../store.js';
 import * as router from '../router.js';
 import { el, clear, emptyState, openModal, confirmDialog, promptDialog, toast, fmtDate, menuButton, tryOr, downloadJSON } from '../ui.js';
+import { getSession } from '../supabase.js';
+import { openAuthModal } from './auth.js';
 
 export async function renderSchede(mount) {
   window.setViewTitle('Le mie schede');
   const workouts = await store.listWorkouts();
+
+  // getSession() legge solo da localStorage (nessuna rete da loggati-fuori):
+  // una sola chiamata serve sia all'avviso "dati solo locali" (loggati-fuori)
+  // sia a decidere se mostrare il promemoria backup.
+  const session = await getSession();
 
   const active = workouts.filter((w) => !w.archived);
   const archived = workouts.filter((w) => w.archived);
 
   clear(mount);
 
-  // Promemoria backup discreto (dismissibile per la sessione)
-  if (!backupReminderDismissed && await store.shouldRemindBackup(30)) {
-    mount.appendChild(backupBanner());
+  // Avvisi in cima alla home, in funzione dello stato di login.
+  // - Loggati-FUORI: i dati sono solo locali -> mostra l'avviso leggero che
+  //   invita ad accedere (= anche backup automatico). Preferiamo questo
+  //   all'ex promemoria "fai un backup fisico" perché punta già alla
+  //   soluzione, evitando due banner sovrapposti.
+  // - Loggati-DENTRO: nessun avviso (il cloud è il backup automatico: il nag
+  //   sui backup .json sarebbe sbagliato).
+  if (!session && !localDataNoticeDismissed) {
+    mount.appendChild(localDataNotice());
   }
 
   if (workouts.length === 0) {
@@ -52,17 +65,22 @@ function sectionHead(text) {
 }
 
 // dismiss valido finché l'app resta aperta (non insistente)
-let backupReminderDismissed = false;
+let localDataNoticeDismissed = false;
 
-function backupBanner() {
+/**
+ * Avviso leggero per utenti NON loggati: ricorda che i dati sono solo locali e
+ * offre un pulsante che apre direttamente login/registrazione. Riusa il look
+ * discreto di `.backup-banner`. Dismissibile per la sessione corrente.
+ */
+function localDataNotice() {
   const banner = el('div', { class: 'backup-banner' }, [
     el('div', { style: 'flex:1;' }, [
-      el('div', { style: 'font-weight:600;', text: '💾 Fai un backup' }),
-      el('div', { class: 'small muted', text: 'I dati stanno solo su questo telefono. Salvane una copia per sicurezza.' }),
+      el('div', { style: 'font-weight:600;', text: '☁️ Dati solo su questo dispositivo' }),
+      el('div', { class: 'small muted', text: 'Accedi per salvarli online e usarli su altri dispositivi.' }),
     ]),
     el('div', { style: 'display:flex; flex-direction:column; gap:6px;' }, [
-      el('button', { class: 'btn btn-sm btn-primary', onClick: () => router.navigate('impostazioni') }, 'Esporta'),
-      el('button', { class: 'btn btn-sm btn-ghost', onClick: () => { backupReminderDismissed = true; banner.remove(); } }, 'Più tardi'),
+      el('button', { class: 'btn btn-sm btn-primary', onClick: () => openAuthModal() }, 'Accedi'),
+      el('button', { class: 'btn btn-sm btn-ghost', onClick: () => { localDataNoticeDismissed = true; banner.remove(); } }, 'Più tardi'),
     ]),
   ]);
   return banner;

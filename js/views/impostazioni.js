@@ -74,13 +74,24 @@ export async function renderImpostazioni(mount) {
  * disiscrivono da sole quando la card non è più nel DOM (cambio vista).
  */
 async function setupAccountSection(card) {
+  // Guardia anti-doppione: render() è asincrona (ha un await su getSession /
+  // getUser tra clear(card) e l'append dei nodi). Se due trigger la lanciano
+  // "a cavallo" — tipicamente l'await render() iniziale e l'evento
+  // INITIAL_SESSION che onAuthStateChange emette subito dopo la subscribe —
+  // entrambe le passate fanno clear() e poi, al ritorno dall'await, appendono
+  // i propri nodi: la card finisce popolata DUE volte. Serializziamo con un
+  // token di generazione: ogni render incrementa `gen`, e dopo ogni await una
+  // passata ormai "stale" (gen diverso) si ferma senza toccare il DOM. Così
+  // vince sempre e solo l'ultima render, che popola la card UNA volta.
+  let gen = 0;
   const render = async () => {
     if (!card.isConnected) return;
-    clear(card);
+    const myGen = ++gen;
     const session = await getSession();
-    if (!card.isConnected) return;
+    if (myGen !== gen || !card.isConnected) return; // superata da una render più recente
+    clear(card);
     if (session) {
-      await renderAccountLoggedIn(card);
+      await renderAccountLoggedIn(card, () => myGen === gen && card.isConnected);
     } else {
       renderAccountLoggedOut(card);
     }
@@ -115,10 +126,16 @@ function renderAccountLoggedOut(card) {
   }, '🔐  Accedi / Registrati'));
 }
 
-/** Stato loggato: email, stato sync, "Sincronizza ora" ed "Esci". */
-async function renderAccountLoggedIn(card) {
+/**
+ * Stato loggato: email, stato sync, "Sincronizza ora" ed "Esci".
+ * @param {HTMLElement} card
+ * @param {() => boolean} isCurrent  true se questa render è ancora quella
+ *   corrente (non superata da una più recente) e la card è nel DOM: viene
+ *   ricontrollata dopo l'await su getUser prima di appendere i nodi.
+ */
+async function renderAccountLoggedIn(card, isCurrent = () => card.isConnected) {
   const user = await getUser();
-  if (!card.isConnected) return;
+  if (!isCurrent()) return;
   const email = (user && user.email) || 'Account';
   const status = sync.getStatus();
 
