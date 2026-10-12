@@ -35,6 +35,23 @@ export function signOut() {
   return supabase.auth.signOut();
 }
 
+/**
+ * Invia l'email di recupero password. Supabase manda un link che riporta
+ * all'app (redirectTo): cliccandolo l'utente torna autenticato in sessione di
+ * "recovery" e può impostare una nuova password (vedi updatePassword).
+ * Ritorna il { data, error } di supabase.
+ * @param {string} email
+ * @param {string} [redirectTo]  URL a cui tornare dopo il click sul link
+ */
+export function resetPassword(email, redirectTo = window.location.origin + window.location.pathname) {
+  return supabase.auth.resetPasswordForEmail(email, { redirectTo });
+}
+
+/** Imposta una nuova password per l'utente nella sessione corrente (recovery). */
+export function updatePassword(password) {
+  return supabase.auth.updateUser({ password });
+}
+
 /** Sessione corrente (o null se non loggato). */
 export async function getSession() {
   return (await supabase.auth.getSession()).data.session;

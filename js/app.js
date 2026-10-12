@@ -2,6 +2,7 @@
 import * as router from './router.js';
 import * as sync from './sync.js';
 import { getSession, onAuthStateChange } from './supabase.js';
+import { openNewPasswordModal } from './views/auth.js';
 import { toast } from './ui.js';
 import { renderSchede } from './views/schede.js';
 import { renderScheda } from './views/scheda.js';
@@ -80,7 +81,11 @@ sync.start();
 getSession().then((s) => { if (s) sync.fullSync(); });
 // Ad ogni nuovo login allinea i dati; al logout non si fa nulla lato rete
 // (i dati locali restano, la sync diventa un no-op senza sessione).
-onAuthStateChange((event) => { if (event === 'SIGNED_IN') sync.fullSync(); });
+// PASSWORD_RECOVERY: l'utente è tornato dal link email -> chiedi la nuova password.
+onAuthStateChange((event) => {
+  if (event === 'SIGNED_IN') sync.fullSync();
+  else if (event === 'PASSWORD_RECOVERY') openNewPasswordModal();
+});
 
 // Registra service worker (solo se servito via http/https, non file://)
 // e gestisce l'auto-aggiornamento quando pubblichi una nuova versione.
