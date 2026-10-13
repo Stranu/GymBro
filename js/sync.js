@@ -259,10 +259,14 @@ let syncing = false; // guard contro chiamate concorrenti
  * Al primo uso per account-su-dispositivo esegue la MIGRAZIONE INIZIALE: carica
  * i dati locali come baseline del server PRIMA del primo pull, così un remoto
  * vuoto non può cancellare i dati locali. Poi pull + push. Aggiorna lastSync.
+ * @param {object} [knownSession]  sessione già nota (es. dall'evento
+ *   onAuthStateChange(event, session)). Passandola si evita la ri-lettura con
+ *   getSession() che subito dopo SIGNED_IN può ancora restituire null, cosa
+ *   che faceva saltare la prima sincronizzazione dopo il login.
  */
-export async function fullSync() {
+export async function fullSync(knownSession = undefined) {
   if (syncing) return;
-  const session = await getSession();
+  const session = knownSession !== undefined ? knownSession : await getSession();
   if (!session) return;
   const userId = session.user.id;
 

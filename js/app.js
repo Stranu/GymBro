@@ -1,7 +1,7 @@
 /* GymBro - entry point */
 import * as router from './router.js';
 import * as sync from './sync.js';
-import { getSession, onAuthStateChange } from './supabase.js';
+import { onAuthStateChange } from './supabase.js';
 import { openNewPasswordModal } from './views/auth.js';
 import { toast } from './ui.js';
 import { renderSchede } from './views/schede.js';
@@ -77,13 +77,19 @@ router.startRouter();
 // Avvia la sincronizzazione (fire-and-forget: NON deve ritardare il boot).
 // start() registra solo il hook db.onChange ed è un no-op senza sessione.
 sync.start();
-// Se c'è già una sessione, allinea subito i dati col cloud.
-getSession().then((s) => { if (s) sync.fullSync(); });
-// Ad ogni nuovo login allinea i dati; al logout non si fa nulla lato rete
-// (i dati locali restano, la sync diventa un no-op senza sessione).
-// PASSWORD_RECOVERY: l'utente è tornato dal link email -> chiedi la nuova password.
-onAuthStateChange((event) => {
-  if (event === 'SIGNED_IN') sync.fullSync();
+// La sincronizzazione all'avvio e ad ogni login è gestita da onAuthStateChange
+// qui sotto: supabase-js emette INITIAL_SESSION al ripristino della sessione
+// all'avvio e SIGNED_IN al login. Usare l'evento (con la sua session) evita sia
+// la doppia sincronizzazione sia la race di getSession() subito dopo il login.
+// Al logout non si fa nulla lato rete (i dati locali restano, la sync diventa
+// un no-op senza sessione). PASSWORD_RECOVERY: ritorno dal link email -> chiedi
+// la nuova password.
+onAuthStateChange((event, session) => {
+  // Passiamo la session dell'evento a fullSync: subito dopo SIGNED_IN una
+  // ri-lettura con getSession() può ancora essere null e far saltare la prima
+  // sincronizzazione. SIGNED_IN e INITIAL_SESSION (ripristino all'avvio) vanno
+  // entrambi sincronizzati.
+  if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') { if (session) sync.fullSync(session); }
   else if (event === 'PASSWORD_RECOVERY') openNewPasswordModal();
 });
 

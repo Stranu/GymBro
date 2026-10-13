@@ -17,8 +17,15 @@
 import { el, openModal, toast } from '../ui.js';
 import { signIn, signUp, resetPassword, updatePassword } from '../supabase.js';
 
-/** Apre il modale di accesso/registrazione/recupero. */
-export function openAuthModal() {
+/**
+ * Apre il modale di accesso/registrazione/recupero.
+ * @param {object} [opts]
+ * @param {() => void} [opts.onDone]  invocato dopo un login (o signup che apre
+ *   subito una sessione) riuscito. È una notifica esplicita per il chiamante,
+ *   indipendente dagli eventi onAuthStateChange: utile per aggiornare la UI
+ *   senza dipendere dalla loro tempistica.
+ */
+export function openAuthModal({ onDone } = {}) {
   let mode = 'login'; // 'login' | 'signup' | 'recover'
 
   const emailInput = el('input', {
@@ -140,7 +147,7 @@ export function openAuthModal() {
     }
     showError('');
     try {
-      const { error } = mode === 'login'
+      const { data, error } = mode === 'login'
         ? await signIn(email, password)
         : await signUp(email, password);
       if (error) {
@@ -149,12 +156,18 @@ export function openAuthModal() {
         return; // modale resta aperto
       }
       if (mode === 'signup') {
-        // Se la conferma email è attiva non c'è ancora una sessione.
+        // Se la conferma email è attiva non c'è ancora una sessione: in quel
+        // caso NON notifichiamo onDone (l'utente non è ancora loggato).
         toast('Registrazione effettuata. Controlla la tua email se richiesto.');
+        const session = data && data.session;
+        close();
+        if (session && typeof onDone === 'function') onDone();
       } else {
         toast('Accesso effettuato');
+        close();
+        if (typeof onDone === 'function') onDone();
       }
-      close();
+      return;
     } catch (err) {
       console.error(err);
       showError('Errore di connessione. Riprova.');

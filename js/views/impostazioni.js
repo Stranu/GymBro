@@ -84,16 +84,23 @@ async function setupAccountSection(card) {
   // passata ormai "stale" (gen diverso) si ferma senza toccare il DOM. Così
   // vince sempre e solo l'ultima render, che popola la card UNA volta.
   let gen = 0;
-  const render = async () => {
+  // render(sessionOverride): se la sessione è già nota (es. arriva dall'evento
+  // onAuthStateChange(event, session)) la usiamo direttamente ed evitiamo la
+  // ri-lettura con getSession(). Questo elimina una race di supabase-js in cui,
+  // subito dopo SIGNED_IN, getSession() può ancora restituire lo stato vecchio:
+  // era la causa per cui dopo il login la card non si aggiornava finché non si
+  // chiudeva e riapriva l'app. `undefined` = "non noto, rileggi"; `null` =
+  // "nessuna sessione" (logout esplicito).
+  const render = async (sessionOverride = undefined) => {
     if (!card.isConnected) return;
     const myGen = ++gen;
-    const session = await getSession();
+    const session = sessionOverride !== undefined ? sessionOverride : await getSession();
     if (myGen !== gen || !card.isConnected) return; // superata da una render più recente
     clear(card);
     if (session) {
       await renderAccountLoggedIn(card, () => myGen === gen && card.isConnected);
     } else {
-      renderAccountLoggedOut(card);
+      renderAccountLoggedOut(card, render);
     }
   };
 
@@ -104,25 +111,33 @@ async function setupAccountSection(card) {
     if (unsubStatus) { unsubStatus(); unsubStatus = null; }
     if (authSub) { authSub.unsubscribe(); authSub = null; }
   };
-  const onUpdate = () => {
+  const onUpdate = (sessionOverride) => {
     if (!card.isConnected) { cleanup(); return; }
-    render();
+    render(sessionOverride);
   };
 
-  unsubStatus = sync.onStatus(onUpdate);
-  const authRes = onAuthStateChange(() => onUpdate());
+  unsubStatus = sync.onStatus(() => onUpdate());
+  // onAuthStateChange fornisce (event, session): passiamo la session direttamente
+  // alla render così non dipendiamo da una ri-lettura con getSession() che
+  // subito dopo il login potrebbe essere ancora disallineata.
+  const authRes = onAuthStateChange((_event, session) => onUpdate(session || null));
   authSub = authRes && authRes.data ? authRes.data.subscription : null;
 
   await render();
 }
 
-/** Stato NON loggato: spiegazione + pulsante Accedi / Registrati. */
-function renderAccountLoggedOut(card) {
+/**
+ * Stato NON loggato: spiegazione + pulsante Accedi / Registrati.
+ * @param {HTMLElement} card
+ * @param {() => void} rerender  callback per ridisegnare la card dopo il login
+ *   (rete di sicurezza indipendente dall'evento onAuthStateChange).
+ */
+function renderAccountLoggedOut(card, rerender) {
   card.appendChild(el('p', { class: 'muted small', text: 'I dati restano salvati su questo dispositivo. Accedi per salvarli anche sul cloud (backup automatico) e usarli su più dispositivi. L\'app funziona comunque senza account e offline.' }));
   card.appendChild(el('div', { class: 'spacer' }));
   card.appendChild(el('button', {
     class: 'btn btn-primary btn-block',
-    onClick: () => openAuthModal(),
+    onClick: () => openAuthModal({ onDone: () => rerender && rerender() }),
   }, '🔐  Accedi / Registrati'));
 }
 
