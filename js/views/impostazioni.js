@@ -10,10 +10,10 @@ import { openAuthModal } from './auth.js';
 // Icone referenziate via URL assoluti su GitHub Pages così si caricano a
 // prescindere dall'host su cui gira questa pagina.
 const OTHER_SERVICES = [
-  { name: 'IndiSpesabile', url: 'https://stranu.github.io/IndiSpesabile',
+  { name: 'IndiSpesabile', url: 'https://stranu.github.io/IndiSpesabile/',
     icon: 'https://stranu.github.io/IndiSpesabile/icons/icon-192.png',
     desc: 'Lista della spesa condivisa, semplice e veloce.' },
-  { name: 'DeDDMTool', url: 'https://stranu.github.io/DeDDMTool',
+  { name: 'DeDDMTool', url: 'https://stranu.github.io/DeDDMTool/',
     icon: 'https://stranu.github.io/DeDDMTool/icons/icon-192.png',
     desc: 'Strumento per gestire le sessioni di Dungeons & Dragons.' },
 ];
@@ -90,6 +90,8 @@ export async function renderImpostazioni(mount) {
     ...OTHER_SERVICES.map((s) => el('a', {
       class: 'service-row',
       href: s.url,
+      target: '_blank',
+      rel: 'noopener noreferrer',
     }, [
       el('img', { class: 'service-icon', src: s.icon, alt: '', width: '40', height: '40', loading: 'lazy' }),
       el('span', { class: 'service-name', text: s.name }),
