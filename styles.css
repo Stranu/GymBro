@@ -649,3 +649,20 @@ canvas { display: block; width: 100%; touch-action: pan-y; }
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ---------------- Prova gli altri servizi ---------------- */
+.service-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-decoration: none;
+  transition: background 0.12s, transform 0.1s;
+}
+.service-row + .service-row { border-top: 1px solid var(--border); }
+.service-row:active { background: var(--bg-elev-2); transform: scale(0.99); }
+.service-icon { width: 40px; height: 40px; border-radius: 10px; flex: none; }
+.service-name { font-weight: 600; }
+.help-toggle { font-size: 1.1rem; font-weight: 700; }

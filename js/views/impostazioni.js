@@ -6,6 +6,16 @@ import { el, clear, toast, confirmDialog, fmtDate, downloadJSON, tryOr } from '.
 import { getSession, getUser, signOut, onAuthStateChange } from '../supabase.js';
 import { openAuthModal } from './auth.js';
 
+// Gli altri servizi gratuiti dello stesso autore (NON include GymBro stesso).
+// Icone referenziate via URL assoluti su GitHub Pages così si caricano a
+// prescindere dall'host su cui gira questa pagina.
+const OTHER_SERVICES = [
+  { name: 'IndiSpesabile', url: 'https://stranu.github.io/IndiSpesabile',
+    icon: 'https://stranu.github.io/IndiSpesabile/icons/icon-192.png' },
+  { name: 'DeDDMTool', url: 'https://stranu.github.io/DeDDMTool',
+    icon: 'https://stranu.github.io/DeDDMTool/icons/icon-192.png' },
+];
+
 export async function renderImpostazioni(mount) {
   window.setViewTitle('Altro');
   clear(mount);
@@ -50,6 +60,36 @@ export async function renderImpostazioni(mount) {
     el('p', { class: 'muted small', text: 'Installa GymBro sulla schermata Home per usarlo come app, anche offline.' }),
     el('div', { class: 'spacer' }),
     el('button', { class: 'btn btn-ghost btn-block', onClick: () => window.triggerInstall && window.triggerInstall() }, '📲  Aggiungi a schermata Home'),
+  ]));
+
+  // --- Prova gli altri servizi ---
+  const helpP = el('p', {
+    id: 'otherServicesHelp', class: 'muted small', hidden: true,
+    style: 'margin:0 0 12px;',
+    text: 'Altri strumenti gratuiti che ho realizzato. GymBro e IndiSpesabile condividono lo stesso account; DeDDMTool è uno strumento per le sessioni di D&D.',
+  });
+  const helpBtn = el('button', {
+    class: 'icon-btn help-toggle', 'aria-label': 'Mostra descrizione',
+    'aria-expanded': 'false', 'aria-controls': 'otherServicesHelp',
+    onClick: () => {
+      const open = helpP.hasAttribute('hidden'); // ora nascosto -> sta per aprirsi
+      helpP.toggleAttribute('hidden', !open);
+      helpBtn.setAttribute('aria-expanded', String(open));
+    },
+  }, '?');
+  mount.appendChild(el('div', { class: 'section-head' }, [
+    el('h2', { text: 'Prova gli altri servizi' }),
+    helpBtn,
+  ]));
+  mount.appendChild(el('div', { class: 'card' }, [
+    helpP,
+    ...OTHER_SERVICES.map((s) => el('a', {
+      class: 'service-row',
+      href: s.url, target: '_blank', rel: 'noopener noreferrer',
+    }, [
+      el('img', { class: 'service-icon', src: s.icon, alt: '', width: '40', height: '40', loading: 'lazy' }),
+      el('span', { class: 'service-name', text: s.name }),
+    ])),
   ]));
 
   // --- Account e sincronizzazione ---
