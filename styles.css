@@ -666,3 +666,6 @@ canvas { display: block; width: 100%; touch-action: pan-y; }
 .service-icon { width: 40px; height: 40px; border-radius: 10px; flex: none; }
 .service-name { font-weight: 600; }
 .help-toggle { font-size: 1.1rem; font-weight: 700; }
+.service-desc-row { margin: 0; }
+.service-desc-row + .service-desc-row { margin-top: 4px; }
+.service-desc-name { color: var(--text); }

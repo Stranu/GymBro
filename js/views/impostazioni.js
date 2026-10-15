@@ -11,9 +11,11 @@ import { openAuthModal } from './auth.js';
 // prescindere dall'host su cui gira questa pagina.
 const OTHER_SERVICES = [
   { name: 'IndiSpesabile', url: 'https://stranu.github.io/IndiSpesabile',
-    icon: 'https://stranu.github.io/IndiSpesabile/icons/icon-192.png' },
+    icon: 'https://stranu.github.io/IndiSpesabile/icons/icon-192.png',
+    desc: 'Lista della spesa condivisa, semplice e veloce.' },
   { name: 'DeDDMTool', url: 'https://stranu.github.io/DeDDMTool',
-    icon: 'https://stranu.github.io/DeDDMTool/icons/icon-192.png' },
+    icon: 'https://stranu.github.io/DeDDMTool/icons/icon-192.png',
+    desc: 'Strumento per gestire le sessioni di Dungeons & Dragons.' },
 ];
 
 export async function renderImpostazioni(mount) {
@@ -63,11 +65,13 @@ export async function renderImpostazioni(mount) {
   ]));
 
   // --- Prova gli altri servizi ---
-  const helpP = el('p', {
+  const helpP = el('div', {
     id: 'otherServicesHelp', class: 'muted small', hidden: true,
     style: 'margin:0 0 12px;',
-    text: 'Altri strumenti gratuiti che ho realizzato. GymBro e IndiSpesabile condividono lo stesso account; DeDDMTool è uno strumento per le sessioni di D&D.',
-  });
+  }, OTHER_SERVICES.map((s) => el('p', { class: 'muted small service-desc-row' }, [
+    el('strong', { class: 'service-desc-name', text: s.name }),
+    ': ' + s.desc,
+  ])));
   const helpBtn = el('button', {
     class: 'icon-btn help-toggle', 'aria-label': 'Mostra descrizione',
     'aria-expanded': 'false', 'aria-controls': 'otherServicesHelp',
@@ -85,7 +89,7 @@ export async function renderImpostazioni(mount) {
     helpP,
     ...OTHER_SERVICES.map((s) => el('a', {
       class: 'service-row',
-      href: s.url, target: '_blank', rel: 'noopener noreferrer',
+      href: s.url,
     }, [
       el('img', { class: 'service-icon', src: s.icon, alt: '', width: '40', height: '40', loading: 'lazy' }),
       el('span', { class: 'service-name', text: s.name }),
