@@ -89,7 +89,20 @@ onAuthStateChange((event, session) => {
   // ri-lettura con getSession() può ancora essere null e far saltare la prima
   // sincronizzazione. SIGNED_IN e INITIAL_SESSION (ripristino all'avvio) vanno
   // entrambi sincronizzati.
-  if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') { if (session) sync.fullSync(session); }
+  if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+    if (session) sync.fullSync(session);
+    // Ri-renderizza subito la sezione corrente così il login si riflette
+    // immediatamente, anche se il sync è un no-op o fallisce (senza questo la
+    // pagina non si aggiorna e il login sembra fallito finché non si cambia
+    // sezione). Non è vincolato a `session`: se c'è stato un cambio di stato
+    // auth la UI va comunque aggiornata.
+    router.refresh();
+  }
+  else if (event === 'SIGNED_OUT') {
+    // Niente rete al logout (i dati locali restano). Aggiorniamo solo la UI
+    // così il logout si riflette in place senza cambiare sezione.
+    router.refresh();
+  }
   else if (event === 'PASSWORD_RECOVERY') openNewPasswordModal();
 });
 

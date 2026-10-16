@@ -28,10 +28,13 @@ html, body {
   color: var(--text);
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 16px;
-  overscroll-behavior-y: none;
 }
 
-body { -webkit-user-select: none; user-select: none; }
+/* overscroll-behavior-y limitato a body (NON html): html è lo scroller
+   radice/viewport su mobile, lasciarlo libero riabilita il pull-to-refresh
+   nativo del browser (tira verso il basso dal bordo superiore per ricaricare),
+   come fa l'app gemella IndiSpesabile. */
+body { overscroll-behavior-y: none; -webkit-user-select: none; user-select: none; }
 input, textarea { -webkit-user-select: text; user-select: text; }
 
 #app { display: flex; flex-direction: column; min-height: 100vh; }

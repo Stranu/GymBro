@@ -55,6 +55,14 @@ export async function handleRoute() {
   changeListeners.forEach((fn) => { try { fn(currentRoute); } catch (e) { console.error(e); } });
 }
 
+// refresh() — ri-renderizza la route corrente in place (svuota #view e ri-esegue
+// la renderFn della route attiva). Usata dopo un cambio di stato auth così la
+// sezione montata riflette subito la nuova sessione, senza aspettare un
+// cambio di hash o l'arrivo di una modifica dallo store.
+export function refresh() {
+  if (currentRoute) handleRoute();
+}
+
 export function startRouter() {
   window.addEventListener('hashchange', handleRoute);
   if (!location.hash) location.hash = '#/schede';
