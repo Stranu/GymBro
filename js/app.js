@@ -84,26 +84,35 @@ sync.start();
 // Al logout non si fa nulla lato rete (i dati locali restano, la sync diventa
 // un no-op senza sessione). PASSWORD_RECOVERY: ritorno dal link email -> chiedi
 // la nuova password.
+// Stato auth "logico" precedente (true = loggato). Serve a distinguere un
+// CAMBIO reale di stato (login/logout) da una semplice RIEMISSIONE di eventi:
+// supabase-js rievoca onAuthStateChange (INITIAL_SESSION, TOKEN_REFRESHED) anche
+// quando l'app torna in primo piano o il token si rinfresca, pur restando
+// loggati. Ri-renderizzare la vista in quei casi faceva ripartire la scheda
+// dall'inizio (perdita di scroll/posizione) ad ogni blocco schermo o cambio app.
+let wasLoggedIn = null; // null = non ancora determinato
 onAuthStateChange((event, session) => {
-  // Passiamo la session dell'evento a fullSync: subito dopo SIGNED_IN una
-  // ri-lettura con getSession() può ancora essere null e far saltare la prima
-  // sincronizzazione. SIGNED_IN e INITIAL_SESSION (ripristino all'avvio) vanno
-  // entrambi sincronizzati.
-  if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-    if (session) sync.fullSync(session);
-    // Ri-renderizza subito la sezione corrente così il login si riflette
-    // immediatamente, anche se il sync è un no-op o fallisce (senza questo la
-    // pagina non si aggiorna e il login sembra fallito finché non si cambia
-    // sezione). Non è vincolato a `session`: se c'è stato un cambio di stato
-    // auth la UI va comunque aggiornata.
-    router.refresh();
+  const isLoggedIn = !!session;
+
+  // La sincronizzazione va comunque tentata quando c'è una sessione all'avvio o
+  // al login (fullSync è idempotente: il guard interno evita i doppioni).
+  if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {
+    sync.fullSync(session);
   }
-  else if (event === 'SIGNED_OUT') {
-    // Niente rete al logout (i dati locali restano). Aggiorniamo solo la UI
-    // così il logout si riflette in place senza cambiare sezione.
-    router.refresh();
+
+  if (event === 'PASSWORD_RECOVERY') {
+    openNewPasswordModal();
   }
-  else if (event === 'PASSWORD_RECOVERY') openNewPasswordModal();
+
+  // Aggiorna la UI SOLO se lo stato loggato/sloggato è davvero cambiato.
+  // Questo evita il re-render (e il salto in cima) alle riemissioni di eventi
+  // mentre lo stato resta invariato.
+  if (wasLoggedIn !== isLoggedIn) {
+    wasLoggedIn = isLoggedIn;
+    // Alla primissima determinazione dello stato all'avvio la vista è appena
+    // stata montata dal router: non serve ri-renderizzarla.
+    if (event !== 'INITIAL_SESSION') router.refresh();
+  }
 });
 
 // Registra service worker (solo se servito via http/https, non file://)
