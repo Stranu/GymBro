@@ -54,9 +54,9 @@ let expanded = false; // stato locale: pannello timer aperto o no
  * Barra strumenti compatta (Opzione A): una sola riga con contatore serie a
  * sinistra e timer a destra. Toccando il tempo si espandono i controlli fini
  * (−15/+15/↺), che si richiudono da soli all'avvio o con un altro tap.
- * @param {object} opts { defaultRestSeconds }
+ * @param {object} opts { defaultRestSeconds, onReset }
  */
-export function createToolbar({ defaultRestSeconds } = {}) {
+export function createToolbar({ defaultRestSeconds, onReset } = {}) {
   if (defaultRestSeconds && !timerState.running) timerState.lastPreset = defaultRestSeconds;
 
   // --- Contatore serie (compatto) ---
@@ -97,7 +97,15 @@ export function createToolbar({ defaultRestSeconds } = {}) {
 
   const timer = el('div', { class: 'tc-timer' }, [panel, timerMain]);
 
-  const bar = el('div', { class: 'workout-tools-compact' }, [counter, timer]);
+  // --- Tasto reset stato "fatto" (glifo 🧹, distinto dal ↺ che azzera il timer) ---
+  const resetBtn = el('button', {
+    class: 'tc-reset',
+    'aria-label': 'Azzera stato "fatto" di giorni ed esercizi',
+    title: 'Azzera i "fatto"',
+    onClick: () => { if (onReset) onReset(); },
+  }, '🧹');
+
+  const bar = el('div', { class: 'workout-tools-compact' }, [counter, timer, resetBtn]);
 
   refs = { counterValue, timerDisplay, startBtn, bar, panel };
   syncExpanded();

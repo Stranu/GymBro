@@ -7,6 +7,17 @@ import {
 import { openExercisePicker } from './picker.js';
 import { createToolbar, teardownTools, startTimerWith } from './tools.js';
 import { openWeightDialog } from './weight-dialog.js';
+import { swipeRow } from '../swipe.js';
+
+// Detacher dei listener swipe del render corrente: svuotati (chiamati) a ogni
+// re-render, prima di ricostruire il DOM (vedi clearSwipes / renderScheda).
+const swipeDetachers = [];
+function clearSwipes() {
+  while (swipeDetachers.length) {
+    const d = swipeDetachers.pop();
+    try { d(); } catch (_) { /* noop */ }
+  }
+}
 
 // cache dei pesi più recenti, dei nomi e del progresso per exerciseId (evita query ripetute e flicker durante il render)
 let latestCache = {};
@@ -54,6 +65,9 @@ export async function renderScheda(mount, params) {
   // precarica pesi recenti per tutti gli esercizi della scheda
   await preloadLatest(w);
 
+  // Stacca i listener swipe del render precedente MENTRE i loro nodi esistono
+  // ancora, cioè prima che clear(mount) li rimuova.
+  clearSwipes();
   clear(mount);
 
   // Intestazione scheda: nota + default
@@ -73,7 +87,7 @@ export async function renderScheda(mount, params) {
 
   // Barra strumenti fissa: contatore serie + timer di recupero
   const defRest = parseRestSeconds((w.defaults || {}).rest) || 90;
-  mount.appendChild(createToolbar({ defaultRestSeconds: defRest }));
+  mount.appendChild(createToolbar({ defaultRestSeconds: defRest, onReset: () => resetAllDone(w) }));
 
   // Quando si lascia la scheda, ferma il timer
   registerTeardown();
@@ -168,6 +182,13 @@ function dayCard(w, day) {
     ].filter(Boolean)),
     el('button', { class: 'icon-btn', 'aria-label': 'Opzioni giorno', onClick: () => dayMenu(w, day) }, '⋮'),
   ]);
+  // Swipe a sinistra sull'header giorno = stessa azione del menu "Segna fatto/da fare".
+  const { element: headWrap, detach: headDetach } = swipeRow(head, {
+    onSwipeLeft: () => toggleDayDone(w, day),
+    leftLabel: done ? 'Da fare' : 'Fatto',
+    leftIcon: done ? '↩️' : '✓',
+  });
+  swipeDetachers.push(headDetach);
 
   let body;
   if (items.length) {
@@ -186,7 +207,47 @@ function dayCard(w, day) {
     el('button', { class: 'btn btn-sm btn-ghost', onClick: () => addSuperset(w, day) }, '+ Super serie'),
   ]);
 
-  return el('div', { class: 'card' }, [head, body, actions]);
+  return el('div', { class: 'card' }, [headWrap, body, actions]);
+}
+
+/** Commuta lo stato "fatto" del giorno. Riusato dal menu giorno e dallo swipe. */
+async function toggleDayDone(w, day) {
+  const was = store.isDayDone(day);
+  day.done = !was;
+  if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) {
+    toast(was ? 'Segnato da fare' : 'Segnato come fatto');
+    rerender();
+  }
+}
+
+/** Commuta lo stato "fatto" di un esercizio (item singolo o sub-esercizio). */
+async function toggleExerciseDone(w, target) {
+  target.done = !target.done;
+  if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) {
+    toast(target.done ? 'Esercizio fatto' : 'Segnato da fare');
+    rerender();
+  }
+}
+
+/** Azzera lo stato "fatto" di tutti i giorni e di tutti gli esercizi (previa conferma). */
+async function resetAllDone(w) {
+  const ok = await confirmDialog(
+    'Azzerare i "fatto"?',
+    'Lo stato "fatto" di tutti i giorni e di tutti gli esercizi di questa scheda verrà rimosso.',
+    { okLabel: 'Azzera', danger: true },
+  );
+  if (!ok) return;
+  (w.days || []).forEach((d) => {
+    d.done = false;
+    (d.items || []).forEach((it) => {
+      it.done = false;
+      if (it.type === 'superset') (it.exercises || []).forEach((s) => { s.done = false; });
+    });
+  });
+  if (await tryOr(() => store.saveWorkout(w), 'Azzeramento non riuscito')) {
+    toast('Stato azzerato');
+    rerender();
+  }
 }
 
 function dayMenu(w, day) {
@@ -194,13 +255,7 @@ function dayMenu(w, day) {
   const body = el('div', {});
   const { close } = openModal(day.name, body);
   body.append(
-    menuButton(done ? '↩️  Segna da fare' : '✓  Segna come fatto', close, async () => {
-      day.done = !done;
-      if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) {
-        toast(done ? 'Segnato da fare' : 'Segnato come fatto');
-        rerender();
-      }
-    }),
+    menuButton(done ? '↩️  Segna da fare' : '✓  Segna come fatto', close, () => toggleDayDone(w, day)),
     menuButton('✏️  Rinomina giorno', close, async () => {
       const name = await promptDialog('Rinomina giorno', { label: 'Nome', value: day.name });
       if (name) { day.name = name; if (await tryOr(() => store.saveWorkout(w), 'Salvataggio non riuscito')) rerender(); }
@@ -243,21 +298,40 @@ function renderSingle(w, day, item) {
     ? `${latest.value} kg`
     : (latest && latest.note ? latest.note : '—');
 
-  return el('div', { class: 'ex-row' }, [
+  const done = !!item.done;
+  const row = el('div', { class: 'ex-row' + (done ? ' ex-done' : '') }, [
     dragHandle(),
-    el('div', { class: 'ex-main', onClick: () => openExerciseSheet(w, day, item) }, [
+    done ? el('span', { class: 'ex-check', text: '✓ ' }) : null,
+    el('div', { class: 'ex-main', onClick: (e) => { if (swipeJustFired(e)) return; openExerciseSheet(w, day, item); } }, [
       el('div', { class: 'ex-name', text: name }),
       el('div', { class: 'ex-meta' }, [
         meta ? el('span', { text: meta }) : null,
         (item.note ? el('span', { text: (meta ? ' · ' : '') + item.note }) : null),
       ].filter(Boolean)),
     ]),
-    el('div', { class: 'ex-weight-col', onClick: () => quickWeight(w, item.exerciseId), title: 'Aggiorna peso' }, [
+    el('div', { class: 'ex-weight-col', onClick: (e) => { if (swipeJustFired(e)) return; quickWeight(w, item.exerciseId); }, title: 'Aggiorna peso' }, [
       el('div', { class: 'ex-weight' + (item.pushNext ? ' push-next-weight' : '') }, wLabel),
       progressCache[item.exerciseId] ? progressBadge(progressCache[item.exerciseId].delta) : null,
     ].filter(Boolean)),
     el('button', { class: 'icon-btn ex-menu-btn', 'aria-label': 'Opzioni esercizio', onClick: (e) => { e.stopPropagation(); exerciseMenu(w, day, item, item.exerciseId); } }, '⋮'),
-  ]);
+  ].filter(Boolean));
+  const { element, detach } = swipeRow(row, {
+    onSwipeLeft: () => toggleExerciseDone(w, item),
+    leftLabel: done ? 'Da fare' : 'Fatto',
+    leftIcon: done ? '↩️' : '✓',
+  });
+  swipeDetachers.push(detach);
+  return element;
+}
+
+/**
+ * True se un click è il residuo sintetico di uno swipe appena scattato:
+ * il foreground swipe (`.swipe-fg`) porta `data-swipe-just-fired` per ~400ms.
+ * Usato dai click handler di .ex-main / .ex-weight-col per NON aprire
+ * sheet/dialog peso subito dopo uno swipe (vedi MEDIUM-2 della design review).
+ */
+function swipeJustFired(e) {
+  return !!(e.currentTarget.closest('.swipe-fg')?.dataset.swipeJustFired);
 }
 
 function dragHandle() {
@@ -292,17 +366,26 @@ function renderSuperset(w, day, item) {
   const rows = (item.exercises || []).map((sub) => {
     const latest = latestCache[sub.exerciseId];
     const wLabel = latest && latest.value != null ? `${latest.value} kg` : (latest && latest.note ? latest.note : '—');
-    return el('div', { class: 'ex-row' }, [
-      el('div', { class: 'ex-main', onClick: () => openSupersetSubSheet(w, day, item, sub) }, [
+    const done = !!sub.done;
+    const row = el('div', { class: 'ex-row' + (done ? ' ex-done' : '') }, [
+      done ? el('span', { class: 'ex-check', text: '✓ ' }) : null,
+      el('div', { class: 'ex-main', onClick: (e) => { if (swipeJustFired(e)) return; openSupersetSubSheet(w, day, item, sub); } }, [
         el('div', { class: 'ex-name', text: exName(sub.exerciseId) }),
         el('div', { class: 'ex-meta', text: [sub.reps ? sub.reps + ' rip' : '', sub.note || ''].filter(Boolean).join(' · ') }),
       ]),
-      el('div', { class: 'ex-weight-col', onClick: () => quickWeight(w, sub.exerciseId), title: 'Aggiorna peso' }, [
+      el('div', { class: 'ex-weight-col', onClick: (e) => { if (swipeJustFired(e)) return; quickWeight(w, sub.exerciseId); }, title: 'Aggiorna peso' }, [
         el('div', { class: 'ex-weight' + (sub.pushNext ? ' push-next-weight' : '') }, wLabel),
         progressCache[sub.exerciseId] ? progressBadge(progressCache[sub.exerciseId].delta) : null,
       ].filter(Boolean)),
       el('button', { class: 'icon-btn ex-menu-btn', 'aria-label': 'Opzioni esercizio', onClick: (e) => { e.stopPropagation(); exerciseMenu(w, day, sub, sub.exerciseId); } }, '⋮'),
-    ]);
+    ].filter(Boolean));
+    const { element, detach } = swipeRow(row, {
+      onSwipeLeft: () => toggleExerciseDone(w, sub),
+      leftLabel: done ? 'Da fare' : 'Fatto',
+      leftIcon: done ? '↩️' : '✓',
+    });
+    swipeDetachers.push(detach);
+    return element;
   });
 
   const meta = paramLine(w, item);
@@ -330,6 +413,9 @@ function enableReorder(listEl, w, day) {
       const row = handle.closest('[data-item-id]');
       if (!row) return;
       e.preventDefault();
+      // Se la riga era lasciata a metà swipe, azzera il transform residuo del
+      // foreground così non parte sfalsata durante il trascinamento.
+      row.querySelector('.swipe-fg')?.style.removeProperty('transform');
       dragging = row;
       const rect = row.getBoundingClientRect();
       offsetY = e.clientY - rect.top;

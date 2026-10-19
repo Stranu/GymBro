@@ -277,8 +277,52 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   margin-bottom: 6px;
   letter-spacing: 0.05em;
 }
-.superset .ex-row { margin-bottom: 6px; }
-.superset .ex-row:last-child { margin-bottom: 0; }
+/* Spaziatura tra sub-righe di una super serie RI-ANCORATA al wrapper swipe:
+   dopo l'avvolgimento ogni .ex-row è l'ultimo figlio del PROPRIO .swipe-wrap,
+   quindi ".superset .ex-row:last-child" matcherebbe TUTTE le sub-righe. Lo
+   spazio va sul wrapper (unico figlio diretto di .superset), non sulla riga. */
+.superset > .swipe-wrap { margin-bottom: 6px; }
+.superset > .swipe-wrap:last-child { margin-bottom: 0; }
+.superset .ex-row { margin-bottom: 0; }
+
+/* ---------------- Swipe-to-action righe (portato da IndiSpesabile) ---------------- */
+/* Il wrapper POSSIEDE bordo, raggio e margine che prima stavano sulla .ex-row:
+   così overflow:hidden ritaglia il reveal sugli angoli arrotondati e il bordo
+   non "cavalca" il colore rivelato durante la traslazione. */
+.swipe-wrap { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; }
+.swipe-fg { position: relative; z-index: 1; background: var(--bg); touch-action: pan-y; will-change: transform; }
+.swipe-fg.swipe-animate { transition: transform 180ms ease-out; }
+.swipe-bg { position: absolute; inset: 0; display: flex; z-index: 0; }
+
+/* La .ex-row, diventata .swipe-fg dentro il wrapper, cede bordo/raggio/margine
+   al wrapper (li possiede ora .swipe-wrap). Resta il background opaco. */
+.ex-row.swipe-fg { border: none; border-radius: 0; margin-bottom: 0; }
+
+/* Header giorno avvolto nello swipe: è un div flex SENZA background proprio,
+   figlio diretto di .card (#1e293b). Il default .swipe-fg{background:var(--bg)}
+   lo dipingerebbe color pagina dentro una card più chiara -> seam visibile.
+   Override obbligatorio: nel contesto card il foreground usa il colore card.
+   Le sub-righe di una super serie restano invece su var(--bg), identico al loro
+   background a riposo (nessun cambio di colore percepito durante lo swipe). */
+.card > .swipe-wrap > .swipe-fg { background: var(--card); }
+
+.swipe-reveal { display: flex; align-items: center; gap: 8px; padding: 0 16px; font-weight: 700; color: #fff; opacity: 0; flex: 1 1 50%; }
+.swipe-reveal.visible { opacity: 1; }
+.swipe-reveal-right { justify-content: flex-start; background: var(--primary); } /* gesto verso destra: non usato ora */
+.swipe-reveal-left  { justify-content: flex-end;   background: var(--success); } /* gesto verso sinistra = azione "fatto" */
+.swipe-reveal.armed { filter: none; }
+.swipe-reveal:not(.armed).visible { filter: brightness(0.92) saturate(0.9); } /* colore che si intensifica oltre soglia */
+.swipe-ic { font-size: 1.3rem; line-height: 1; }
+.swipe-tx { font-size: 0.9rem; letter-spacing: 0.3px; }
+
+/* Stato "esercizio fatto": riga sbiadita, spunta verde a piena opacità */
+.ex-row.ex-done { opacity: 0.72; }
+.ex-row.ex-done .ex-check { opacity: 1; }
+.ex-check { color: var(--success); font-weight: 700; }
+
+/* Tasto reset "fatto" nella barra strumenti */
+.tc-reset { background: var(--bg-elev-2); border: none; color: var(--text); border-radius: 10px; height: 40px; min-width: 40px; padding: 0 10px; font-size: 1.1rem; flex: none; }
+.tc-reset:active { opacity: 0.85; }
 
 /* Empty state */
 .empty {
