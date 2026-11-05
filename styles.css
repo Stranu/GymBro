@@ -64,6 +64,28 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Indicatore "Offline" discreto nell'header: pill testuale + pallino colorato.
+   flex:none così .app-title { flex:1 } non lo schiaccia. */
+.offline-indicator {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+.offline-indicator::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+/* Necessaria: non esiste una regola globale [hidden] in questo file e
+   display:inline-flex vincerebbe sul display:none nativo dell'attributo hidden,
+   lasciando la pill sempre visibile. */
+.offline-indicator[hidden] { display: none; }
 .icon-btn {
   background: transparent;
   border: none;

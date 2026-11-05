@@ -7,27 +7,31 @@ import { openAuthModal } from './auth.js';
 
 export async function renderSchede(mount) {
   window.setViewTitle('Le mie schede');
-  const workouts = await store.listWorkouts();
-
-  // getSession() legge solo da localStorage (nessuna rete da loggati-fuori):
-  // una sola chiamata serve sia all'avviso "dati solo locali" (loggati-fuori)
-  // sia a decidere se mostrare il promemoria backup.
-  const session = await getSession();
+  const workouts = await store.listWorkouts(); // locale (IndexedDB)
 
   const active = workouts.filter((w) => !w.archived);
   const archived = workouts.filter((w) => w.archived);
 
   clear(mount);
 
-  // Avvisi in cima alla home, in funzione dello stato di login.
-  // - Loggati-FUORI: i dati sono solo locali -> mostra l'avviso leggero che
-  //   invita ad accedere (= anche backup automatico). Preferiamo questo
-  //   all'ex promemoria "fai un backup fisico" perché punta già alla
-  //   soluzione, evitando due banner sovrapposti.
-  // - Loggati-DENTRO: nessun avviso (il cloud è il backup automatico: il nag
-  //   sui backup .json sarebbe sbagliato).
-  if (!session && !localDataNoticeDismissed) {
-    mount.appendChild(localDataNotice());
+  // Segnaposto in cima: la lista si disegna SUBITO dal locale; l'eventuale
+  // avviso "dati solo su questo dispositivo" viene deciso fuori dal percorso
+  // critico (vedi in fondo), così un fallimento/pendenza di rete non blocca
+  // mai il render dell'elenco schede. (Local-first: come grafici/esercizi.)
+  const noticeSlot = el('div', {});
+  mount.appendChild(noticeSlot);
+
+  // Banner "dati solo locali" deciso FUORI dal percorso critico (fire-and-forget):
+  // solo se loggati-fuori (getSession() -> null, senza errori) lo mostriamo.
+  // Offline/backend down: nessun banner, ma le schede restano comunque visibili.
+  if (!localDataNoticeDismissed) {
+    getSession()
+      .then((session) => {
+        if (!session && noticeSlot.isConnected && !localDataNoticeDismissed) {
+          noticeSlot.appendChild(localDataNotice());
+        }
+      })
+      .catch(() => { /* offline/backend down: nessun banner, schede visibili */ });
   }
 
   if (workouts.length === 0) {

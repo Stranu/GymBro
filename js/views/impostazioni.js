@@ -2,8 +2,9 @@
 import * as store from '../store.js';
 import * as router from '../router.js';
 import * as sync from '../sync.js';
+import * as connectivity from '../connectivity.js';
 import { el, clear, toast, confirmDialog, fmtDate, downloadJSON, tryOr } from '../ui.js';
-import { getSession, getUser, signOut, onAuthStateChange } from '../supabase.js';
+import { getSession, signOut, onAuthStateChange } from '../supabase.js';
 import { openAuthModal } from './auth.js';
 
 // Gli altri servizi gratuiti dello stesso autore (NON include GymBro stesso).
@@ -102,7 +103,7 @@ export async function renderImpostazioni(mount) {
   mount.appendChild(el('div', { class: 'section-head' }, [el('h2', { text: 'Account e sincronizzazione' })]));
   const accountCard = el('div', { class: 'card' });
   mount.appendChild(accountCard);
-  await setupAccountSection(accountCard);
+  setupAccountSection(accountCard);
 
   // --- Dati / reset ---
   mount.appendChild(el('div', { class: 'section-head' }, [el('h2', { text: 'Zona pericolosa' })]));
@@ -119,43 +120,59 @@ export async function renderImpostazioni(mount) {
  * questa card (le altre sezioni restano intatte). Le sottoscrizioni si
  * disiscrivono da sole quando la card non è più nel DOM (cambio vista).
  */
-async function setupAccountSection(card) {
-  // Guardia anti-doppione: render() è asincrona (ha un await su getSession /
-  // getUser tra clear(card) e l'append dei nodi). Se due trigger la lanciano
-  // "a cavallo" — tipicamente l'await render() iniziale e l'evento
-  // INITIAL_SESSION che onAuthStateChange emette subito dopo la subscribe —
-  // entrambe le passate fanno clear() e poi, al ritorno dall'await, appendono
-  // i propri nodi: la card finisce popolata DUE volte. Serializziamo con un
-  // token di generazione: ogni render incrementa `gen`, e dopo ogni await una
-  // passata ormai "stale" (gen diverso) si ferma senza toccare il DOM. Così
-  // vince sempre e solo l'ultima render, che popola la card UNA volta.
+function setupAccountSection(card) {
+  // Riga esplicita di stato offline: nodo STABILE, primo figlio della card,
+  // FUORI dalla zona ripulita dai clear() del ciclo render (che ripuliscono
+  // solo `authWrap`). Creata una volta, aggiornata solo in testo/visibilità.
+  const offlineLine = el('p', {
+    class: 'muted small', hidden: true, style: 'margin:0 0 8px;',
+    text: 'Sei offline — i dati sono salvati in locale e verranno sincronizzati al ritorno della connessione.',
+  });
+  card.appendChild(offlineLine);
+
+  // Wrapper per lo stato auth: è QUESTO che viene clear-ato dalle render,
+  // così la riga offline sopra resta intatta.
+  const authWrap = el('div', {});
+  card.appendChild(authWrap);
+
+  const applyOffline = ({ offline }) => { offlineLine.hidden = !offline; };
+  applyOffline(connectivity.getState());
+
+  // Guardia anti-doppione: render()/apply() fanno clear(authWrap) e, in alcuni
+  // percorsi, un await su getSession() prima di appendere i nodi. Se due trigger
+  // la lanciano "a cavallo" — tipicamente la render() iniziale e l'evento
+  // INITIAL_SESSION che onAuthStateChange emette subito dopo la subscribe — la
+  // card finirebbe popolata due volte. Serializziamo con un token di generazione:
+  // ogni render incrementa `gen`, e una passata ormai "stale" (gen diverso) si
+  // ferma senza toccare il DOM. Vince sempre e solo l'ultima render.
   let gen = 0;
   // render(sessionOverride): se la sessione è già nota (es. arriva dall'evento
-  // onAuthStateChange(event, session)) la usiamo direttamente ed evitiamo la
-  // ri-lettura con getSession(). Questo elimina una race di supabase-js in cui,
-  // subito dopo SIGNED_IN, getSession() può ancora restituire lo stato vecchio:
-  // era la causa per cui dopo il login la card non si aggiornava finché non si
-  // chiudeva e riapriva l'app. `undefined` = "non noto, rileggi"; `null` =
-  // "nessuna sessione" (logout esplicito).
-  const render = async (sessionOverride = undefined) => {
+  // onAuthStateChange(event, session)) la usiamo direttamente. `undefined` =
+  // "non noto, rileggi"; `null` = "nessuna sessione" (logout esplicito).
+  // Pattern IndiSpesabile "render immediato, poi upgrade": disegna SUBITO lo
+  // stato loggato-fuori (default sincrono, mai vuoto), poi passa a loggato se
+  // arriva una sessione. Nessun await di rete tra clear(authWrap) e il default.
+  const render = (sessionOverride = undefined) => {
     if (!card.isConnected) return;
     const myGen = ++gen;
-    const session = sessionOverride !== undefined ? sessionOverride : await getSession();
-    if (myGen !== gen || !card.isConnected) return; // superata da una render più recente
-    clear(card);
-    if (session) {
-      await renderAccountLoggedIn(card, () => myGen === gen && card.isConnected);
-    } else {
-      renderAccountLoggedOut(card, render);
-    }
+    clear(authWrap);
+    renderAccountLoggedOut(authWrap, render); // default sincrono: mai vuoto
+    const apply = (session) => {
+      if (myGen !== gen || !card.isConnected) return; // superata da una render più recente
+      if (session) { clear(authWrap); renderAccountLoggedIn(authWrap, session); }
+    };
+    if (sessionOverride !== undefined) apply(sessionOverride);
+    else getSession().then(apply).catch(() => { /* resta loggato-fuori, mai vuoto */ });
   };
 
   // Sottoscrizioni con auto-cleanup quando la card lascia il DOM.
   let unsubStatus = null;
   let authSub = null;
+  let unsubConn = null;
   const cleanup = () => {
     if (unsubStatus) { unsubStatus(); unsubStatus = null; }
     if (authSub) { authSub.unsubscribe(); authSub = null; }
+    if (unsubConn) { unsubConn(); unsubConn = null; }
   };
   const onUpdate = (sessionOverride) => {
     if (!card.isConnected) { cleanup(); return; }
@@ -168,8 +185,13 @@ async function setupAccountSection(card) {
   // subito dopo il login potrebbe essere ancora disallineata.
   const authRes = onAuthStateChange((_event, session) => onUpdate(session || null));
   authSub = authRes && authRes.data ? authRes.data.subscription : null;
+  // La riga offline consuma la STESSA fonte di verità dell'indicatore header.
+  unsubConn = connectivity.subscribe((state) => {
+    if (!card.isConnected) { cleanup(); return; }
+    applyOffline(state);
+  });
 
-  await render();
+  render();
 }
 
 /**
@@ -189,15 +211,16 @@ function renderAccountLoggedOut(card, rerender) {
 
 /**
  * Stato loggato: email, stato sync, "Sincronizza ora" ed "Esci".
+ * SINCRONA e senza rete: l'email arriva dalla sessione già disponibile
+ * (session.user.email, locale), non più da getUser() (che faceva una richiesta
+ * di rete a GET /auth/v1/user e, con Supabase giù, lasciava la card vuota).
+ * Tradeoff intenzionale: niente validazione server-side del token su questa
+ * schermata, in cambio di "mai card vuota offline" e "Esci" sempre disponibile.
  * @param {HTMLElement} card
- * @param {() => boolean} isCurrent  true se questa render è ancora quella
- *   corrente (non superata da una più recente) e la card è nel DOM: viene
- *   ricontrollata dopo l'await su getUser prima di appendere i nodi.
+ * @param {object} session  sessione corrente (da getSession/onAuthStateChange)
  */
-async function renderAccountLoggedIn(card, isCurrent = () => card.isConnected) {
-  const user = await getUser();
-  if (!isCurrent()) return;
-  const email = (user && user.email) || 'Account';
+function renderAccountLoggedIn(card, session) {
+  const email = (session && session.user && session.user.email) || 'Account';
   const status = sync.getStatus();
 
   card.appendChild(el('p', { class: 'small', text: 'Connesso come ' + email }));

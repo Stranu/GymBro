@@ -16,6 +16,7 @@
 import * as db from './db.js';
 import * as store from './store.js';
 import { supabase, getSession } from './supabase.js';
+import * as connectivity from './connectivity.js';
 
 /* ---------------- Mapping colonne per tabella ---------------- */
 // Chiave = campo locale (camelCase), valore = colonna remota (snake_case).
@@ -151,10 +152,19 @@ async function markLastSync() {
  * trigger riprova. Non lancia mai eccezioni verso l'esterno.
  */
 export async function push() {
-  const session = await getSession();
+  let session;
+  try {
+    session = await getSession();
+  } catch (e) {
+    // errore su getSession != "Supabase offline": trattalo come nessuna
+    // sessione e esci SENZA toccare lo stato connettività.
+    return;
+  }
   if (!session) return; // nessuna rete da loggati-fuori
   const userId = session.user.id;
 
+  let anyTableError = false;
+  let madeNetworkCall = false;
   for (const name of SYNCED) {
     try {
       const since = await getPushed(name);
@@ -173,11 +183,14 @@ export async function push() {
 
       const liveRows = changed.map((r) => mapToRemote(name, r, userId));
       const rows = [...liveRows, ...deletedRows];
-      if (rows.length === 0) continue;
+      if (rows.length === 0) continue; // idle: nessuna chiamata, stato invariato
 
       const { error } = await supabase.from(REMOTE_TABLE[name]).upsert(rows);
+      madeNetworkCall = true;
       if (error) {
         console.error('[sync] push error', name, error);
+        anyTableError = true;
+        connectivity.markUnreachable();
         continue; // non avanzare cursore, non eliminare tombstones: riprova dopo
       }
 
@@ -192,9 +205,12 @@ export async function push() {
       for (const t of tombstones) await db.delLocal('tombstones', t.tid);
     } catch (e) {
       console.error('[sync] push exception', name, e);
+      anyTableError = true;
+      connectivity.markUnreachable();
       // continua con gli altri store; non lanciare verso la UI
     }
   }
+  if (!anyTableError && madeNetworkCall) connectivity.markReachable();
 }
 
 /* ---------------- Pull ---------------- */
@@ -206,9 +222,18 @@ export async function push() {
  * sessione esce subito. Non lancia mai verso l'esterno.
  */
 export async function pull() {
-  const session = await getSession();
+  let session;
+  try {
+    session = await getSession();
+  } catch (e) {
+    // errore su getSession != "Supabase offline": trattalo come nessuna
+    // sessione e esci SENZA toccare lo stato connettività.
+    return;
+  }
   if (!session) return;
 
+  let anyTableError = false;
+  let madeNetworkCall = false;
   for (const name of SYNCED) {
     try {
       const since = await getPulled(name);
@@ -216,8 +241,14 @@ export async function pull() {
         .from(REMOTE_TABLE[name])
         .select('*')
         .gt('updated_at', since);
+      // Il round-trip è avvenuto: un select riuscito ANCHE se vuoto è prova di
+      // raggiungibilità. Diversamente da push(), qui madeNetworkCall si alza
+      // subito dopo il select, a prescindere da data.length.
+      madeNetworkCall = true;
       if (error) {
         console.error('[sync] pull error', name, error);
+        anyTableError = true;
+        connectivity.markUnreachable();
         continue; // non avanzare il cursore
       }
       if (!data || data.length === 0) continue;
@@ -246,8 +277,11 @@ export async function pull() {
       if (maxUpdated !== since) await setPulled(name, maxUpdated);
     } catch (e) {
       console.error('[sync] pull exception', name, e);
+      anyTableError = true;
+      connectivity.markUnreachable();
     }
   }
+  if (!anyTableError && madeNetworkCall) connectivity.markReachable();
 }
 
 /* ---------------- fullSync (avvio + tasto manuale) ---------------- */
@@ -266,7 +300,14 @@ let syncing = false; // guard contro chiamate concorrenti
  */
 export async function fullSync(knownSession = undefined) {
   if (syncing) return;
-  const session = knownSession !== undefined ? knownSession : await getSession();
+  let session;
+  try {
+    session = knownSession !== undefined ? knownSession : await getSession();
+  } catch (e) {
+    // errore su getSession != "Supabase offline": nessuna sessione, esci
+    // SENZA toccare lo stato connettività.
+    return;
+  }
   if (!session) return;
   const userId = session.user.id;
 
@@ -284,8 +325,10 @@ export async function fullSync(knownSession = undefined) {
     await pull();
     await push();
     await markLastSync();
+    connectivity.markReachable();
   } catch (e) {
     console.error('[sync] fullSync exception', e);
+    connectivity.markUnreachable();
   } finally {
     syncing = false;
     setSyncing(false);

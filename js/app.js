@@ -1,6 +1,7 @@
 /* GymBro - entry point */
 import * as router from './router.js';
 import * as sync from './sync.js';
+import * as connectivity from './connectivity.js';
 import { onAuthStateChange } from './supabase.js';
 import { openNewPasswordModal } from './views/auth.js';
 import { toast } from './ui.js';
@@ -41,6 +42,7 @@ const bottomNav = document.getElementById('bottomNav');
 const btnBack = document.getElementById('btnBack');
 const btnMenu = document.getElementById('btnMenu');
 const viewTitle = document.getElementById('viewTitle');
+const offlineIndicator = document.getElementById('offlineIndicator');
 
 // Navigazione bottom nav
 bottomNav.addEventListener('click', (e) => {
@@ -77,6 +79,20 @@ router.startRouter();
 // Avvia la sincronizzazione (fire-and-forget: NON deve ritardare il boot).
 // start() registra solo il hook db.onChange ed è un no-op senza sessione.
 sync.start();
+
+// Avvia il rilevamento connettività e pilota l'indicatore header "Offline".
+// Fonte di verità unica: navigator.onLine + raggiungibilità Supabase (segnalata
+// da sync.js). L'indicatore è un singolo nodo nell'header, fuori da #view:
+// resta coerente su tutte le route senza essere ri-cablato.
+connectivity.start();
+const updateOfflineIndicator = ({ offline }) => {
+  if (offlineIndicator) offlineIndicator.hidden = !offline;
+};
+connectivity.subscribe(updateOfflineIndicator);
+updateOfflineIndicator(connectivity.getState()); // stato iniziale
+// Al ritorno della connettività lanciamo un fullSync: il suo esito pilota
+// markReachable/markUnreachable in sync.js, sbloccando l'indicatore (un-latch).
+window.addEventListener('online', () => sync.fullSync());
 // La sincronizzazione all'avvio e ad ogni login è gestita da onAuthStateChange
 // qui sotto: supabase-js emette INITIAL_SESSION al ripristino della sessione
 // all'avvio e SIGNED_IN al login. Usare l'evento (con la sua session) evita sia
